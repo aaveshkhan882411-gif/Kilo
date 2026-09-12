@@ -1,0 +1,26 @@
+from fastapi import APIRouter
+from app.routers import auth, organizations, users, leads, crm, tasks, appointments, campaigns, workflows, analytics, outcomes, audit, integrations, billing, paypal, website, agents, admin, health, whatsapp, google
+
+api_router = APIRouter()
+
+api_router.include_router(auth.router, prefix="/auth", tags=["Auth"])
+api_router.include_router(organizations.router, prefix="/organizations", tags=["Organizations"])
+api_router.include_router(users.router, prefix="/users", tags=["Users"])
+api_router.include_router(leads.router, prefix="/leads", tags=["Leads"])
+api_router.include_router(crm.router, prefix="/crm", tags=["CRM"])
+api_router.include_router(tasks.router, prefix="/tasks", tags=["Tasks"])
+api_router.include_router(appointments.router, prefix="/appointments", tags=["Appointments"])
+api_router.include_router(campaigns.router, prefix="/campaigns", tags=["Campaigns"])
+api_router.include_router(workflows.router, prefix="/workflows", tags=["Workflows"])
+api_router.include_router(analytics.router, prefix="/analytics", tags=["Analytics"])
+api_router.include_router(outcomes.router, prefix="/outcomes", tags=["Outcomes"])
+api_router.include_router(audit.router, prefix="/audit", tags=["Audit"])
+api_router.include_router(integrations.router, prefix="/integrations", tags=["Integrations"])
+api_router.include_router(billing.router, prefix="/billing", tags=["Billing"])
+api_router.include_router(paypal.router, prefix="/paypal", tags=["PayPal"])
+api_router.include_router(website.router, prefix="/website", tags=["Website"])
+api_router.include_router(agents.router, prefix="/agents", tags=["Agents"])
+api_router.include_router(admin.router, prefix="/admin", tags=["Admin"])
+api_router.include_router(health.router, prefix="/health", tags=["Health"])
+api_router.include_router(whatsapp.router, prefix="/whatsapp", tags=["WhatsApp"])
+api_router.include_router(google.router, prefix="/google", tags=["Google"])
