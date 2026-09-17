@@ -1,3 +1,4 @@
+from app.models.user import User
 from fastapi import APIRouter, Depends
 from app.auth.dependencies import get_current_active_user
 from app.schemas.workflow import WorkflowCreate, WorkflowResponse

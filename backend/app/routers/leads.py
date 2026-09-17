@@ -5,6 +5,7 @@ from app.database import get_db
 from app.schemas.lead import LeadCreate, LeadUpdate, LeadResponse, LeadScoreResponse
 from app.models.lead import Lead
 from app.auth.dependencies import get_current_active_user
+from app.models.user import User
 
 router = APIRouter()
 

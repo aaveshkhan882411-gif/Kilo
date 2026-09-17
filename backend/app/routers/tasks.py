@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends
 from app.auth.dependencies import get_current_active_user
 from app.schemas.task import TaskCreate, TaskResponse
 from app.schemas.appointment import AppointmentCreate, AppointmentResponse
+from app.models.user import User
 
 router = APIRouter()
 

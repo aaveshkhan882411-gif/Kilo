@@ -47,6 +47,7 @@ class User(Base):
     role = Column(String(50), nullable=False, default="viewer")
     org_id = Column(String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
     is_verified = Column(Boolean, default=False, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
     last_login = Column(DateTime, nullable=True)
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)

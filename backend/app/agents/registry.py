@@ -1,3 +1,5 @@
+from typing import List, Dict, Any
+from typing import Optional
 from app.agents.base import BaseAgent
 from app.agents.contracts import AGENT_CONTRACTS, AgentContract
 from app.agents.gip import gip_bus, GIPEvent

@@ -10,6 +10,7 @@ class OutcomeLifecycleStatus(str, Enum):
     EXECUTING = "EXECUTING"
     EXECUTED = "EXECUTED"
     VERIFIED = "VERIFIED"
+    FAILED = "FAILED"
     OUTCOME_RECORDED = "OUTCOME_RECORDED"
 
 

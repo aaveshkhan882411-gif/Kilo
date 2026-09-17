@@ -1,3 +1,4 @@
+from typing import Optional, Dict, Any
 from app.ai.gateway import ai_gateway
 from app.config import settings
 

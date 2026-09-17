@@ -1,3 +1,4 @@
+from app.models.user import User
 from fastapi import APIRouter, Depends
 from app.auth.dependencies import get_current_superuser
 from app.schemas.audit_log import AuditLogFilter, AuditLogResponse

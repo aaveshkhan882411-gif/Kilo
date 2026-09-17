@@ -1,9 +1,10 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from app.schemas.contact import ContactCreate, ContactResponse
 from app.schemas.company import CompanyCreate, CompanyResponse
 from app.schemas.deal import DealCreate, DealResponse, DealStageUpdate
 from app.schemas.customer import CustomerCreate, CustomerResponse
 from app.auth.dependencies import get_current_active_user
+from app.models.user import User
 
 router = APIRouter()
 

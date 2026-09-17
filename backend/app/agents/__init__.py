@@ -1,3 +1,4 @@
+from typing import Dict, Any
 from app.agents.base import BaseAgent
 from app.agents.contracts import AgentContract
 from app.agents.registry import registry
