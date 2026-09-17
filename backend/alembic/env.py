@@ -8,7 +8,8 @@ from app.models import *
 
 config = context.config
 
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+if not config.get_main_option("sqlalchemy.url"):
+    config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
 
 target_metadata = Base.metadata
 
