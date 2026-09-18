@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from typing import Optional
 from datetime import datetime
 
@@ -13,6 +13,12 @@ class AppointmentCreate(BaseModel):
     attendee_id: Optional[str] = None
     lead_id: Optional[str] = None
     status: str = "scheduled"
+
+    @model_validator(mode="after")
+    def validate_times(self):
+        if self.end_time <= self.start_time:
+            raise ValueError("end_time must be after start_time")
+        return self
 
 
 class AppointmentUpdate(BaseModel):
