@@ -7,7 +7,6 @@ from .config import settings
 from .database import close_db
 from .middleware.security import SecurityHeadersMiddleware
 from .middleware.rate_limit import RateLimitMiddleware
-from .middleware.tenant import TenantIsolationMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +38,6 @@ app.add_middleware(
 
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RateLimitMiddleware)
-app.add_middleware(TenantIsolationMiddleware)
 
 
 @app.get("/health")

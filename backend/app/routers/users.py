@@ -26,7 +26,7 @@ async def create_user(
         hashed_password=hash_password(user_in.password),
         full_name=user_in.full_name,
         role=user_in.role,
-        org_id=user_in.org_id,
+        org_id=current_user.org_id,
     )
     db.add(user)
     await db.commit()

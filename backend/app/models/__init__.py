@@ -449,6 +449,8 @@ class Payment(Base):
     amount = Column(Numeric(10, 2), nullable=False)
     currency = Column(String(3), nullable=False, default="USD")
     status = Column(String(50), nullable=False, default="pending")
+    plan = Column(String(50), nullable=False, default="standard")
+    billing_cycle = Column(String(20), nullable=False, default="monthly")
     paypal_order_id = Column(String(255), nullable=True, unique=True)
     paypal_capture_id = Column(String(255), nullable=True, unique=True)
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
@@ -460,4 +462,22 @@ class Payment(Base):
         Index("ix_payments_org_id", "org_id"),
         Index("ix_payments_status", "status"),
         Index("ix_payments_paypal_order_id", "paypal_order_id"),
+    )
+
+
+class PayPalWebhookEvent(Base):
+    __tablename__ = "paypal_webhook_events"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    event_id = Column(String(255), nullable=False, unique=True)
+    event_type = Column(String(255), nullable=False)
+    status = Column(String(50), nullable=False, default="received")
+    payload = Column(Text, nullable=False)
+    received_at = Column(DateTime, server_default=func.now(), nullable=False)
+    processed_at = Column(DateTime, nullable=True)
+    error = Column(Text, nullable=True)
+
+    __table_args__ = (
+        Index("ix_paypal_webhook_events_event_id", "event_id"),
+        Index("ix_paypal_webhook_events_status", "status"),
     )

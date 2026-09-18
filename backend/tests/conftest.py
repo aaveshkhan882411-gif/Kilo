@@ -7,6 +7,8 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sess
 from sqlalchemy.pool import NullPool
 
 from app.main import app
+from app.middleware.rate_limit import _client
+
 from app.database import get_db, Base
 
 TEST_DATABASE_URL = "postgresql+asyncpg://growthai:password@localhost:5432/growthai_test"
@@ -32,6 +34,12 @@ async def override_get_db():
 
 
 app.dependency_overrides[get_db] = override_get_db
+
+# Disable Redis-backed rate limiting during tests to avoid cross-event-loop Redis clients.
+for _middleware in list(app.user_middleware):
+    if _middleware.cls.__name__ == "RateLimitMiddleware":
+        app.user_middleware.remove(_middleware)
+app.middleware_stack = app.build_middleware_stack()
 
 
 @pytest.fixture(scope="session")

@@ -1,12 +1,6 @@
-from fastapi import Request
-from starlette.middleware.base import BaseHTTPMiddleware
-from app.database import async_session_factory
-from app.config import settings
+"""Deprecated tenant middleware.
 
-
-class TenantIsolationMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        tenant_id = request.headers.get("X-Tenant-ID")
-        if tenant_id:
-            request.state.tenant_id = tenant_id
-        return await call_next(request)
+Tenant isolation is enforced from the authenticated user organization ID
+at the router/service authorization layer. Client-supplied X-Tenant-ID is
+not trusted as an authorization source.
+"""

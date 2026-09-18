@@ -1,25 +1,41 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+
 from app.database import get_db
-from app.schemas.organization import OrganizationCreate, OrganizationUpdate, OrganizationResponse
+from app.schemas.organization import (
+    OrganizationCreate,
+    OrganizationUpdate,
+    OrganizationResponse,
+)
 from app.models.organization import Organization
 from app.auth.dependencies import get_current_superuser
 from app.models.user import User
 
+
 router = APIRouter()
 
 
-@router.post("/", response_model=OrganizationResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/",
+    response_model=OrganizationResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def create_organization(
     org_in: OrganizationCreate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_superuser),
 ):
-    result = await db.execute(select(Organization).where(Organization.slug == org_in.slug))
+    result = await db.execute(
+        select(Organization).where(Organization.slug == org_in.slug)
+    )
     existing = result.scalar_one_or_none()
+
     if existing:
-        raise HTTPException(status_code=400, detail="Organization slug already exists")
+        raise HTTPException(
+            status_code=400,
+            detail="Organization slug already exists",
+        )
 
     org = Organization(**org_in.model_dump())
     db.add(org)
@@ -33,7 +49,11 @@ async def list_organizations(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_superuser),
 ):
-    result = await db.execute(select(Organization))
+    result = await db.execute(
+        select(Organization).where(
+            Organization.id == current_user.org_id
+        )
+    )
     return result.scalars().all()
 
 
@@ -43,10 +63,25 @@ async def get_organization(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_superuser),
 ):
-    result = await db.execute(select(Organization).where(Organization.id == org_id))
+    if org_id != current_user.org_id:
+        raise HTTPException(
+            status_code=404,
+            detail="Organization not found",
+        )
+
+    result = await db.execute(
+        select(Organization).where(
+            Organization.id == current_user.org_id
+        )
+    )
     org = result.scalar_one_or_none()
+
     if not org:
-        raise HTTPException(status_code=404, detail="Organization not found")
+        raise HTTPException(
+            status_code=404,
+            detail="Organization not found",
+        )
+
     return org
 
 
@@ -57,13 +92,28 @@ async def update_organization(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_superuser),
 ):
-    result = await db.execute(select(Organization).where(Organization.id == org_id))
+    if org_id != current_user.org_id:
+        raise HTTPException(
+            status_code=404,
+            detail="Organization not found",
+        )
+
+    result = await db.execute(
+        select(Organization).where(
+            Organization.id == current_user.org_id
+        )
+    )
     org = result.scalar_one_or_none()
+
     if not org:
-        raise HTTPException(status_code=404, detail="Organization not found")
+        raise HTTPException(
+            status_code=404,
+            detail="Organization not found",
+        )
 
     for field, value in org_in.model_dump(exclude_unset=True).items():
         setattr(org, field, value)
+
     await db.commit()
     await db.refresh(org)
     return org

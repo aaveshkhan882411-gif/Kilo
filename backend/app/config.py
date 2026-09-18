@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     PAYPAL_CLIENT_ID: str = ""
     PAYPAL_CLIENT_SECRET: str = ""
     PAYPAL_WEBHOOK_ID: str = ""
+    PAYPAL_BASE_URL: str = "https://api-m.sandbox.paypal.com"
 
     # Google OAuth / Calendar
     GOOGLE_CLIENT_ID: str = ""
