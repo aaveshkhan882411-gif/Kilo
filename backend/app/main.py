@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 import logging
 
 from .config import settings
-from .database import init_db, close_db
+from .database import close_db
 from .middleware.security import SecurityHeadersMiddleware
 from .middleware.rate_limit import RateLimitMiddleware
 from .middleware.tenant import TenantIsolationMiddleware
@@ -15,8 +15,7 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting GrowthAI application")
-    await init_db()
-    logger.info("Database initialized")
+    logger.info("Database schema is managed by Alembic migrations")
     yield
     logger.info("Shutting down GrowthAI application")
     await close_db()
