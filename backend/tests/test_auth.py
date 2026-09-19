@@ -1,6 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
 
 from app.models.organization import Organization
 from app.models.user import User
@@ -9,29 +10,31 @@ from app.auth.utils import hash_password
 
 @pytest.mark.asyncio
 async def test_user_registration(client: TestClient, db: AsyncSession):
-    org = Organization(
-        name="Registration Test Org",
-        slug="registration-test-org",
-        plan="standard",
-    )
-    db.add(org)
-    await db.commit()
-    await db.refresh(org)
-
     response = client.post(
         "/api/auth/register",
         json={
             "email": "newuser@example.com",
             "password": "securepass123",
             "full_name": "New User",
-            "role": "viewer",
-            "org_id": org.id,
+            "organization_name": "Registration Test Org",
+            "organization_slug": "registration-test-org",
         },
     )
 
     assert response.status_code == 201
-    assert response.json()["email"] == "newuser@example.com"
-    assert response.json()["org_id"] == org.id
+
+    data = response.json()
+
+    assert data["email"] == "newuser@example.com"
+    assert data["role"] == "owner"
+    assert data["org_id"]
+
+    org = await db.get(Organization, data["org_id"])
+
+    assert org is not None
+    assert org.name == "Registration Test Org"
+    assert org.slug == "registration-test-org"
+    assert org.plan == "starter"
 
 
 @pytest.mark.asyncio
@@ -78,3 +81,35 @@ def test_login_failure(client: TestClient):
     )
 
     assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_registration_cannot_control_role_or_org(client: TestClient, db: AsyncSession):
+    org = Organization(
+        name="Protected Org",
+        slug="protected-org",
+        plan="standard",
+    )
+    db.add(org)
+    await db.commit()
+    await db.refresh(org)
+
+    response = client.post(
+        "/api/auth/register",
+        json={
+            "email": "attacker@example.com",
+            "password": "securepass123",
+            "full_name": "Attacker",
+            "organization_name": "Attacker Org",
+            "organization_slug": "attacker-org",
+            "role": "admin",
+            "org_id": org.id,
+        },
+    )
+
+    assert response.status_code == 422
+
+    result = await db.execute(
+        select(User).where(User.email == "attacker@example.com")
+    )
+    assert result.scalar_one_or_none() is None
