@@ -1,25 +1,57 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+
 from app.database import get_db
 from app.schemas.user import UserCreate, UserUpdate, UserResponse
 from app.models.user import User
-from app.auth.utils import hash_password, verify_password
+from app.auth.utils import hash_password
 from app.auth.dependencies import get_current_superuser
 
 router = APIRouter()
 
 
-@router.post("/", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+def validate_target_role(
+    current_user: User,
+    target_role: str,
+) -> None:
+    allowed_roles = {"viewer", "admin"}
+
+    if target_role not in allowed_roles:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid target role",
+        )
+
+    if current_user.role == "admin" and target_role != "viewer":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admins can only create or assign viewer users",
+        )
+
+
+@router.post(
+    "/",
+    response_model=UserResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def create_user(
     user_in: UserCreate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_superuser),
 ):
-    result = await db.execute(select(User).where(User.email == user_in.email))
+    result = await db.execute(
+        select(User).where(User.email == user_in.email)
+    )
     existing = result.scalar_one_or_none()
+
     if existing:
-        raise HTTPException(status_code=400, detail="Email already registered")
+        raise HTTPException(
+            status_code=400,
+            detail="Email already registered",
+        )
+
+    validate_target_role(current_user, user_in.role)
 
     user = User(
         email=user_in.email,
@@ -28,9 +60,11 @@ async def create_user(
         role=user_in.role,
         org_id=current_user.org_id,
     )
+
     db.add(user)
     await db.commit()
     await db.refresh(user)
+
     return user
 
 
@@ -39,7 +73,9 @@ async def list_users(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_superuser),
 ):
-    result = await db.execute(select(User).where(User.org_id == current_user.org_id))
+    result = await db.execute(
+        select(User).where(User.org_id == current_user.org_id)
+    )
     return result.scalars().all()
 
 
@@ -49,12 +85,23 @@ async def get_user(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_superuser),
 ):
-    result = await db.execute(select(User).where(User.id == user_id))
+    result = await db.execute(
+        select(User).where(User.id == user_id)
+    )
     user = result.scalar_one_or_none()
+
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(
+            status_code=404,
+            detail="User not found",
+        )
+
     if user.org_id != current_user.org_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied",
+        )
+
     return user
 
 
@@ -65,17 +112,43 @@ async def update_user(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_superuser),
 ):
-    result = await db.execute(select(User).where(User.id == user_id))
+    result = await db.execute(
+        select(User).where(User.id == user_id)
+    )
     user = result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    if user.org_id != current_user.org_id:
-        raise HTTPException(status_code=403, detail="Access denied")
 
-    for field, value in user_in.model_dump(exclude_unset=True).items():
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail="User not found",
+        )
+
+    if user.org_id != current_user.org_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied",
+        )
+
+    update_data = user_in.model_dump(exclude_unset=True)
+
+    if "role" in update_data:
+        validate_target_role(
+            current_user,
+            update_data["role"],
+        )
+
+        if user.role == "owner":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Owner role cannot be changed",
+            )
+
+    for field, value in update_data.items():
         setattr(user, field, value)
+
     await db.commit()
     await db.refresh(user)
+
     return user
 
 
@@ -85,12 +158,30 @@ async def delete_user(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_superuser),
 ):
-    result = await db.execute(select(User).where(User.id == user_id))
+    result = await db.execute(
+        select(User).where(User.id == user_id)
+    )
     user = result.scalar_one_or_none()
+
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(
+            status_code=404,
+            detail="User not found",
+        )
+
     if user.org_id != current_user.org_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied",
+        )
+
+    if user.role == "owner":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Owner cannot be deleted",
+        )
+
     await db.delete(user)
     await db.commit()
+
     return None

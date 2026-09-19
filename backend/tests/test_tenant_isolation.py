@@ -172,3 +172,181 @@ async def test_admin_cannot_create_user_in_another_org(client: TestClient, db: A
 
     assert created["org_id"] == org_a.id
     assert created["org_id"] != org_b.id
+
+
+@pytest.mark.asyncio
+async def test_admin_cannot_create_privileged_user(
+    client: TestClient,
+    db: AsyncSession,
+):
+    org = Organization(
+        name="Role Create Org",
+        slug="role-create-org",
+        plan="standard",
+    )
+    db.add(org)
+    await db.commit()
+    await db.refresh(org)
+
+    admin = User(
+        email="role-admin@example.com",
+        hashed_password=hash_password("pass"),
+        full_name="Role Admin",
+        role="admin",
+        org_id=org.id,
+        is_verified=True,
+    )
+    db.add(admin)
+    await db.commit()
+    await db.refresh(admin)
+
+    token = create_access_token(
+        data={"sub": admin.id, "org_id": org.id}
+    )
+
+    response = client.post(
+        "/api/users/",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "email": "privileged-user@example.com",
+            "password": "StrongPassword123!",
+            "full_name": "Privileged User",
+            "role": "owner",
+        },
+    )
+
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_admin_cannot_promote_user_to_admin(
+    client: TestClient,
+    db: AsyncSession,
+):
+    org = Organization(
+        name="Role Update Org",
+        slug="role-update-org",
+        plan="standard",
+    )
+    db.add(org)
+    await db.commit()
+    await db.refresh(org)
+
+    admin = User(
+        email="update-admin@example.com",
+        hashed_password=hash_password("pass"),
+        full_name="Update Admin",
+        role="admin",
+        org_id=org.id,
+        is_verified=True,
+    )
+
+    viewer = User(
+        email="update-viewer@example.com",
+        hashed_password=hash_password("pass"),
+        full_name="Update Viewer",
+        role="viewer",
+        org_id=org.id,
+        is_verified=True,
+    )
+
+    db.add_all([admin, viewer])
+    await db.commit()
+    await db.refresh(admin)
+    await db.refresh(viewer)
+
+    token = create_access_token(
+        data={"sub": admin.id, "org_id": org.id}
+    )
+
+    response = client.patch(
+        f"/api/users/{viewer.id}",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"role": "admin"},
+    )
+
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_owner_can_create_admin(
+    client: TestClient,
+    db: AsyncSession,
+):
+    org = Organization(
+        name="Owner Role Org",
+        slug="owner-role-org",
+        plan="standard",
+    )
+    db.add(org)
+    await db.commit()
+    await db.refresh(org)
+
+    owner = User(
+        email="role-owner@example.com",
+        hashed_password=hash_password("pass"),
+        full_name="Role Owner",
+        role="owner",
+        org_id=org.id,
+        is_verified=True,
+    )
+    db.add(owner)
+    await db.commit()
+    await db.refresh(owner)
+
+    token = create_access_token(
+        data={"sub": owner.id, "org_id": org.id}
+    )
+
+    response = client.post(
+        "/api/users/",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "email": "new-admin@example.com",
+            "password": "StrongPassword123!",
+            "full_name": "New Admin",
+            "role": "admin",
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["role"] == "admin"
+
+
+@pytest.mark.asyncio
+async def test_owner_cannot_change_owner_role(
+    client: TestClient,
+    db: AsyncSession,
+):
+    org = Organization(
+        name="Owner Protection Org",
+        slug="owner-protection-org",
+        plan="standard",
+    )
+    db.add(org)
+    await db.commit()
+    await db.refresh(org)
+
+    owner = User(
+        email="owner-protection@example.com",
+        hashed_password=hash_password("pass"),
+        full_name="Protected Owner",
+        role="owner",
+        org_id=org.id,
+        is_verified=True,
+    )
+    db.add(owner)
+    await db.commit()
+    await db.refresh(owner)
+
+    token = create_access_token(
+        data={"sub": owner.id, "org_id": org.id}
+    )
+
+    response = client.patch(
+        f"/api/users/{owner.id}",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"role": "admin"},
+    )
+
+    assert response.status_code == 403
