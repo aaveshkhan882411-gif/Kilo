@@ -50,7 +50,7 @@ async def login(user_in: UserLogin, db: AsyncSession = Depends(get_db)):
 
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh_token(refresh_in: RefreshTokenRequest, db: AsyncSession = Depends(get_db)):
-    payload = decode_token(refresh_in.refresh_token)
+    payload = decode_token(refresh_in.refresh_token, expected_type="refresh")
     if not payload:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
     user_id = payload.get("sub")
