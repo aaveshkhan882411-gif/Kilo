@@ -10,6 +10,7 @@ from app.schemas.company import CompanyCreate, CompanyResponse
 from app.schemas.deal import DealCreate, DealResponse, DealStageUpdate
 from app.schemas.customer import CustomerCreate, CustomerResponse
 from app.auth.dependencies import get_current_active_user
+from app.services.audit_service import AuditService
 
 router = APIRouter()
 
@@ -21,10 +22,12 @@ async def create_contact(
     current_user: User = Depends(get_current_active_user),
 ):
     if contact_in.lead_id:
+        from app.models import Lead
+
         result = await db.execute(
-            select(__import__("app.models", fromlist=["Lead"]).Lead).where(
-                __import__("app.models", fromlist=["Lead"]).Lead.id == contact_in.lead_id,
-                __import__("app.models", fromlist=["Lead"]).Lead.org_id == current_user.org_id,
+            select(Lead).where(
+                Lead.id == contact_in.lead_id,
+                Lead.org_id == current_user.org_id,
             )
         )
         if result.scalar_one_or_none() is None:
@@ -35,6 +38,18 @@ async def create_contact(
         org_id=current_user.org_id,
     )
     db.add(contact)
+    await db.flush()
+
+    await AuditService.record(
+        db=db,
+        org_id=current_user.org_id,
+        user_id=current_user.id,
+        action="CREATE",
+        entity_type="contact",
+        entity_id=contact.id,
+        changes=contact_in.model_dump(),
+    )
+
     await db.commit()
     await db.refresh(contact)
     return contact
@@ -64,6 +79,18 @@ async def create_company(
         org_id=current_user.org_id,
     )
     db.add(company)
+    await db.flush()
+
+    await AuditService.record(
+        db=db,
+        org_id=current_user.org_id,
+        user_id=current_user.id,
+        action="CREATE",
+        entity_type="company",
+        entity_id=company.id,
+        changes=company_in.model_dump(),
+    )
+
     await db.commit()
     await db.refresh(company)
     return company
@@ -111,6 +138,18 @@ async def create_deal(
         org_id=current_user.org_id,
     )
     db.add(deal)
+    await db.flush()
+
+    await AuditService.record(
+        db=db,
+        org_id=current_user.org_id,
+        user_id=current_user.id,
+        action="CREATE",
+        entity_type="deal",
+        entity_id=deal.id,
+        changes=deal_in.model_dump(),
+    )
+
     await db.commit()
     await db.refresh(deal)
     return deal
@@ -147,10 +186,38 @@ async def update_deal_stage(
     if deal is None:
         raise HTTPException(status_code=404, detail="Deal not found")
 
+    old_stage = deal.stage
+    old_probability = deal.probability
+
     deal.stage = stage_update.stage
 
     if stage_update.probability is not None:
         deal.probability = stage_update.probability
+
+    await db.flush()
+
+    changes = {
+        "stage": {
+            "old": old_stage,
+            "new": deal.stage,
+        },
+    }
+
+    if stage_update.probability is not None:
+        changes["probability"] = {
+            "old": old_probability,
+            "new": deal.probability,
+        }
+
+    await AuditService.record(
+        db=db,
+        org_id=current_user.org_id,
+        user_id=current_user.id,
+        action="UPDATE",
+        entity_type="deal",
+        entity_id=deal.id,
+        changes=changes,
+    )
 
     await db.commit()
     await db.refresh(deal)
@@ -187,6 +254,18 @@ async def create_customer(
         org_id=current_user.org_id,
     )
     db.add(customer)
+    await db.flush()
+
+    await AuditService.record(
+        db=db,
+        org_id=current_user.org_id,
+        user_id=current_user.id,
+        action="CREATE",
+        entity_type="customer",
+        entity_id=customer.id,
+        changes=customer_in.model_dump(),
+    )
+
     await db.commit()
     await db.refresh(customer)
     return customer
