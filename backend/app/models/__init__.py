@@ -57,6 +57,7 @@ class User(Base):
     tasks = relationship("Task", back_populates="assigned_user")
     appointments = relationship("Appointment", back_populates="organizer", foreign_keys="Appointment.organizer_id")
     audit_logs = relationship("AuditLog", back_populates="user")
+    auth_sessions = relationship("AuthSession", back_populates="user", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("ix_users_org_id", "org_id"),
@@ -480,4 +481,25 @@ class PayPalWebhookEvent(Base):
     __table_args__ = (
         Index("ix_paypal_webhook_events_event_id", "event_id"),
         Index("ix_paypal_webhook_events_status", "status"),
+    )
+
+class AuthSession(Base):
+    __tablename__ = "auth_sessions"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(
+        String(36),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    token_hash = Column(String(64), unique=True, nullable=False, index=True)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    revoked_at = Column(DateTime, nullable=True, index=True)
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+
+    user = relationship("User", back_populates="auth_sessions")
+
+    __table_args__ = (
+        Index("ix_auth_sessions_user_id", "user_id"),
+        Index("ix_auth_sessions_active", "user_id", "revoked_at"),
     )
