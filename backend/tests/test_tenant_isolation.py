@@ -350,3 +350,233 @@ async def test_owner_cannot_change_owner_role(
     )
 
     assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_org_a_cannot_see_org_b_integrations(
+    client: TestClient,
+    db: AsyncSession,
+):
+    from app.models import Integration
+
+    org_a = Organization(
+        name="Integration Org A",
+        slug="integration-org-a",
+        plan="standard",
+    )
+    org_b = Organization(
+        name="Integration Org B",
+        slug="integration-org-b",
+        plan="standard",
+    )
+    db.add_all([org_a, org_b])
+    await db.commit()
+
+    user_a = User(
+        email="integration-a@example.com",
+        hashed_password=hash_password("pass"),
+        full_name="Integration User A",
+        role="admin",
+        org_id=org_a.id,
+        is_verified=True,
+    )
+    integration_b = Integration(
+        org_id=org_b.id,
+        provider="secret-provider",
+        config={"secret": "org-b-secret"},
+        status="active",
+    )
+    db.add_all([user_a, integration_b])
+    await db.commit()
+    await db.refresh(integration_b)
+
+    token = create_access_token(
+        data={"sub": user_a.id, "org_id": org_a.id}
+    )
+
+    response = client.get(
+        "/api/integrations/",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    assert all(
+        item["id"] != integration_b.id
+        for item in response.json()
+    )
+
+
+@pytest.mark.asyncio
+async def test_org_a_cannot_update_org_b_integration(
+    client: TestClient,
+    db: AsyncSession,
+):
+    from app.models import Integration
+
+    org_a = Organization(
+        name="Integration Update A",
+        slug="integration-update-a",
+        plan="standard",
+    )
+    org_b = Organization(
+        name="Integration Update B",
+        slug="integration-update-b",
+        plan="standard",
+    )
+    db.add_all([org_a, org_b])
+    await db.commit()
+
+    user_a = User(
+        email="integration-update-a@example.com",
+        hashed_password=hash_password("pass"),
+        full_name="Integration Update User A",
+        role="admin",
+        org_id=org_a.id,
+        is_verified=True,
+    )
+    integration_b = Integration(
+        org_id=org_b.id,
+        provider="protected-provider",
+        config={"protected": True},
+        status="active",
+    )
+    db.add_all([user_a, integration_b])
+    await db.commit()
+    await db.refresh(integration_b)
+
+    token = create_access_token(
+        data={"sub": user_a.id, "org_id": org_a.id}
+    )
+
+    response = client.patch(
+        f"/api/integrations/{integration_b.id}",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"status": "inactive"},
+    )
+
+    assert response.status_code == 404
+
+    await db.refresh(integration_b)
+    assert integration_b.status == "active"
+
+
+@pytest.mark.asyncio
+async def test_org_a_cannot_see_org_b_outcomes(
+    client: TestClient,
+    db: AsyncSession,
+):
+    from app.models import Outcome
+
+    org_a = Organization(
+        name="Outcome Org A",
+        slug="outcome-org-a",
+        plan="standard",
+    )
+    org_b = Organization(
+        name="Outcome Org B",
+        slug="outcome-org-b",
+        plan="standard",
+    )
+    db.add_all([org_a, org_b])
+    await db.commit()
+
+    user_a = User(
+        email="outcome-a@example.com",
+        hashed_password=hash_password("pass"),
+        full_name="Outcome User A",
+        role="admin",
+        org_id=org_a.id,
+        is_verified=True,
+    )
+    outcome_b = Outcome(
+        org_id=org_b.id,
+        entity_type="lead",
+        entity_id="org-b-lead-001",
+        lifecycle_status="REQUESTED",
+        technical_status="pending",
+        business_status="pending",
+        data={"secret": "org-b-data"},
+    )
+    db.add_all([user_a, outcome_b])
+    await db.commit()
+    await db.refresh(outcome_b)
+
+    token = create_access_token(
+        data={"sub": user_a.id, "org_id": org_a.id}
+    )
+
+    response = client.get(
+        "/api/outcomes/lead/org-b-lead-001",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    assert all(
+        item["id"] != outcome_b.id
+        for item in response.json()
+    )
+
+
+@pytest.mark.asyncio
+async def test_org_a_cannot_update_org_b_outcome(
+    client: TestClient,
+    db: AsyncSession,
+):
+    from app.models import Outcome
+
+    org_a = Organization(
+        name="Outcome Update A",
+        slug="outcome-update-a",
+        plan="standard",
+    )
+    org_b = Organization(
+        name="Outcome Update B",
+        slug="outcome-update-b",
+        plan="standard",
+    )
+    db.add_all([org_a, org_b])
+    await db.commit()
+
+    user_a = User(
+        email="outcome-update-a@example.com",
+        hashed_password=hash_password("pass"),
+        full_name="Outcome Update User A",
+        role="admin",
+        org_id=org_a.id,
+        is_verified=True,
+    )
+    outcome_b = Outcome(
+        org_id=org_b.id,
+        entity_type="lead",
+        entity_id="org-b-lead-update-001",
+        lifecycle_status="REQUESTED",
+        technical_status="pending",
+        business_status="pending",
+        data={"protected": True},
+    )
+    db.add_all([user_a, outcome_b])
+    await db.commit()
+    await db.refresh(outcome_b)
+
+    token = create_access_token(
+        data={"sub": user_a.id, "org_id": org_a.id}
+    )
+
+    response = client.patch(
+        f"/api/outcomes/{outcome_b.id}",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "lifecycle_status": "COMPLETED",
+            "technical_status": "success",
+            "business_status": "won",
+            "data": {"hacked": True},
+        },
+    )
+
+    assert response.status_code == 404
+
+    await db.refresh(outcome_b)
+    assert outcome_b.lifecycle_status == "REQUESTED"
+    assert outcome_b.technical_status == "pending"
+    assert outcome_b.business_status == "pending"
+    assert outcome_b.data == {"protected": True}
