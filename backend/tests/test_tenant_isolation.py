@@ -580,3 +580,136 @@ async def test_org_a_cannot_update_org_b_outcome(
     assert outcome_b.technical_status == "pending"
     assert outcome_b.business_status == "pending"
     assert outcome_b.data == {"protected": True}
+
+
+@pytest.mark.asyncio
+async def test_admin_can_only_see_own_org_audit_logs(
+    client: TestClient,
+    db: AsyncSession,
+):
+    from app.models import AuditLog
+
+    org_a = Organization(
+        name="Audit A",
+        slug="audit-a",
+        plan="standard",
+    )
+    org_b = Organization(
+        name="Audit B",
+        slug="audit-b",
+        plan="standard",
+    )
+    db.add_all([org_a, org_b])
+    await db.commit()
+
+    admin_a = User(
+        email="audit-admin-a@example.com",
+        hashed_password=hash_password("pass"),
+        full_name="Audit Admin A",
+        role="admin",
+        org_id=org_a.id,
+        is_verified=True,
+    )
+
+    log_a = AuditLog(
+        org_id=org_a.id,
+        user_id=admin_a.id,
+        action="CREATE",
+        entity_type="lead",
+        entity_id="lead-a",
+        changes={"visible": True},
+    )
+    log_b = AuditLog(
+        org_id=org_b.id,
+        action="DELETE",
+        entity_type="lead",
+        entity_id="lead-b",
+        changes={"secret": True},
+    )
+
+    db.add_all([admin_a, log_a, log_b])
+    await db.commit()
+    await db.refresh(log_a)
+    await db.refresh(log_b)
+
+    token = create_access_token(
+        data={"sub": admin_a.id, "org_id": org_a.id}
+    )
+
+    response = client.get(
+        "/api/audit/",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    returned_ids = {item["id"] for item in response.json()}
+
+    assert log_a.id in returned_ids
+    assert log_b.id not in returned_ids
+
+
+@pytest.mark.asyncio
+async def test_admin_audit_filters_cannot_escape_tenant(
+    client: TestClient,
+    db: AsyncSession,
+):
+    from app.models import AuditLog
+
+    org_a = Organization(
+        name="Audit Filter A",
+        slug="audit-filter-a",
+        plan="standard",
+    )
+    org_b = Organization(
+        name="Audit Filter B",
+        slug="audit-filter-b",
+        plan="standard",
+    )
+    db.add_all([org_a, org_b])
+    await db.commit()
+
+    admin_a = User(
+        email="audit-filter-admin-a@example.com",
+        hashed_password=hash_password("pass"),
+        full_name="Audit Filter Admin A",
+        role="admin",
+        org_id=org_a.id,
+        is_verified=True,
+    )
+
+    log_a = AuditLog(
+        org_id=org_a.id,
+        user_id=admin_a.id,
+        action="CREATE",
+        entity_type="lead",
+        entity_id="shared-entity",
+    )
+    log_b = AuditLog(
+        org_id=org_b.id,
+        action="CREATE",
+        entity_type="lead",
+        entity_id="shared-entity",
+    )
+
+    db.add_all([admin_a, log_a, log_b])
+    await db.commit()
+    await db.refresh(log_a)
+    await db.refresh(log_b)
+
+    token = create_access_token(
+        data={"sub": admin_a.id, "org_id": org_a.id}
+    )
+
+    response = client.get(
+        "/api/audit/",
+        params={
+            "entity_type": "lead",
+            "entity_id": "shared-entity",
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    returned_ids = {item["id"] for item in response.json()}
+
+    assert returned_ids == {log_a.id}
