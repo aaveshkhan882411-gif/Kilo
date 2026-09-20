@@ -7,6 +7,7 @@ from app.database import get_db
 from app.models import Campaign
 from app.models.user import User
 from app.schemas.campaign import CampaignCreate, CampaignResponse
+from app.services.audit_service import AuditService
 
 router = APIRouter()
 
@@ -25,6 +26,18 @@ async def create_campaign(
     )
 
     db.add(campaign)
+    await db.flush()
+
+    await AuditService.record(
+        db=db,
+        org_id=current_user.org_id,
+        user_id=current_user.id,
+        action="CREATE",
+        entity_type="campaign",
+        entity_id=campaign.id,
+        changes=campaign_in.model_dump(mode="json"),
+    )
+
     await db.commit()
     await db.refresh(campaign)
 
