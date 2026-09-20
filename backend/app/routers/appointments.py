@@ -7,6 +7,7 @@ from app.database import get_db
 from app.models import Appointment, Lead
 from app.models.user import User
 from app.schemas.appointment import AppointmentCreate, AppointmentResponse
+from app.services.audit_service import AuditService
 
 router = APIRouter()
 
@@ -56,6 +57,18 @@ async def create_appointment(
     )
 
     db.add(appointment)
+    await db.flush()
+
+    await AuditService.record(
+        db=db,
+        org_id=current_user.org_id,
+        user_id=current_user.id,
+        action="CREATE",
+        entity_type="appointment",
+        entity_id=appointment.id,
+        changes=appt_in.model_dump(mode="json"),
+    )
+
     await db.commit()
     await db.refresh(appointment)
 
