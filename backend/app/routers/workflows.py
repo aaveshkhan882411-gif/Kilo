@@ -7,6 +7,7 @@ from app.database import get_db
 from app.models import Workflow
 from app.models.user import User
 from app.schemas.workflow import WorkflowCreate, WorkflowResponse
+from app.services.audit_service import AuditService
 
 router = APIRouter()
 
@@ -23,6 +24,18 @@ async def create_workflow(
     )
 
     db.add(workflow)
+    await db.flush()
+
+    await AuditService.record(
+        db=db,
+        org_id=current_user.org_id,
+        user_id=current_user.id,
+        action="CREATE",
+        entity_type="workflow",
+        entity_id=workflow.id,
+        changes=workflow_in.model_dump(mode="json"),
+    )
+
     await db.commit()
     await db.refresh(workflow)
 
