@@ -7,6 +7,7 @@ from app.database import get_db
 from app.models import Lead, Task
 from app.models.user import User
 from app.schemas.task import TaskCreate, TaskResponse
+from app.services.audit_service import AuditService
 
 router = APIRouter()
 
@@ -44,6 +45,18 @@ async def create_task(
     )
 
     db.add(task)
+    await db.flush()
+
+    await AuditService.record(
+        db=db,
+        org_id=current_user.org_id,
+        user_id=current_user.id,
+        action="CREATE",
+        entity_type="task",
+        entity_id=task.id,
+        changes=task_in.model_dump(mode="json"),
+    )
+
     await db.commit()
     await db.refresh(task)
 
