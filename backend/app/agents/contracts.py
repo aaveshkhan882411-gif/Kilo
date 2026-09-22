@@ -1,6 +1,5 @@
 from pydantic import BaseModel
 from typing import Dict, Any, List, Optional
-from app.agents.base import BaseAgent
 
 
 class AgentContract(BaseModel):
@@ -164,23 +163,3 @@ AGENT_CONTRACTS: Dict[str, AgentContract] = {
         execution_policy="sequential", verification_policy="manual", failure_policy="retry", audit_policy="full",
     ),
 }
-
-
-class AgentRegistry:
-    def __init__(self):
-        self._agents: Dict[str, BaseAgent] = {}
-
-    def register(self, agent: BaseAgent):
-        self._agents[agent.agent_id] = agent
-
-    def get(self, agent_id: str) -> Optional[BaseAgent]:
-        return self._agents.get(agent_id)
-
-    def list_agents(self) -> List[Dict[str, Any]]:
-        return [{"id": k, "name": v.name} for k, v in self._agents.items()]
-
-    def get_contract(self, agent_id: str) -> Optional[AgentContract]:
-        return AGENT_CONTRACTS.get(agent_id)
-
-
-registry = AgentRegistry()
