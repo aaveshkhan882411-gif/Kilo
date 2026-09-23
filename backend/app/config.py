@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     AI_PROVIDER: str = "vllm"
     VLLM_BASE_URL: str = "http://localhost:8000/v1"
     VLLM_API_KEY: str = ""
+    VLLM_MODEL: str = ""
 
     # PayPal
     PAYPAL_CLIENT_ID: str = ""
