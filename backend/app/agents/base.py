@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional, List
 
 from app.agents.contracts import AGENT_CONTRACTS, AgentContract
+from app.agents.tool_registry import tool_registry
 
 
 class BaseAgent:
@@ -66,30 +67,16 @@ class BaseAgent:
         self,
         tool: str,
         params: Dict[str, Any],
+        permissions: Optional[List[str]] = None,
+        context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        contract = self.get_contract()
-
-        if contract is None:
-            return {
-                "success": False,
-                "error": "Agent contract not found",
-            }
-
-        if tool not in contract.allowed_tools:
-            return {
-                "success": False,
-                "error": f"Tool '{tool}' is not allowed for agent '{self.agent_id}'",
-            }
-
-        # A real tool registry/executor is not wired yet.
-        # Do not pretend that a tool was executed.
-        return {
-            "success": False,
-            "status": "tool_not_implemented",
-            "tool": tool,
-            "error": "Tool execution backend is not implemented yet",
-            "params": params,
-        }
+        return await tool_registry.execute(
+            agent_id=self.agent_id,
+            tool=tool,
+            params=params,
+            permissions=permissions or [],
+            context=context,
+        )
 
     async def verify_result(self, result: Dict[str, Any]) -> bool:
         return bool(result.get("success"))
@@ -154,6 +141,8 @@ class BaseAgent:
             result = await self.execute_tool(
                 requested_tool,
                 parameters,
+                context.get("permissions", []),
+                context,
             )
 
         verified = await self.verify_result(result)
