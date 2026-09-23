@@ -69,14 +69,25 @@ async def execute_agent(
             detail="Explicit authorization is required before agent execution",
         )
 
-    return {
-        "agent_id": agent_id,
+    execution_context = {
+        **task.context,
+        "org_id": current_user.org_id,
+        "user_id": current_user.id,
+        "permissions": task.permissions,
         "task_id": task.task_id,
-        "status": "validated",
-        "result": {
-            "message": "Agent execution request passed authorization checks",
-        },
     }
+
+    execution_task = {
+        "task_id": task.task_id,
+        "agent_id": agent_id,
+        "input": task.input,
+        "context": execution_context,
+        "permissions": task.permissions,
+    }
+
+    result = await agent.execute(execution_task)
+
+    return result
 
 
 @router.post("/completions", response_model=AICompletionResponse)

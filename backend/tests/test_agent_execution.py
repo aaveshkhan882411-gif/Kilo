@@ -46,7 +46,8 @@ async def test_agent_execution_validates_contract_permissions(
     body = response.json()
     assert body["agent_id"] == "ai-sales"
     assert body["task_id"] == "task-1"
-    assert body["status"] == "validated"
+    assert body["status"] == "failed"
+    assert body["result"]["status"] == "no_tool_requested"
 
 
 @pytest.mark.asyncio
@@ -124,3 +125,72 @@ async def test_agent_execution_rejects_unknown_agent(
     )
 
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_agent_execution_runs_registered_tool_with_authenticated_tenant_context(
+    client: TestClient,
+    db: AsyncSession,
+    test_org: Organization,
+    test_user: User,
+):
+    from app.agents.base import BaseAgent
+    from app.agents.registry import registry
+    from app.agents.tool_registry import tool_registry
+
+    captured = {}
+
+    async def fake_crm_tool(params):
+        captured.update(params["_execution_context"])
+        return {
+            "success": True,
+            "status": "executed",
+        }
+
+    tool_registry.register("crm", fake_crm_tool)
+
+    original_agent = registry.get("ai-sales")
+
+    class TestSalesAgent(BaseAgent):
+        async def create_plan(self, context):
+            return {
+                "plan": ["execute crm"],
+                "requested_tool": "crm",
+                "parameters": {},
+            }
+
+    registry.register(TestSalesAgent("ai-sales", "AI Sales"))
+
+    try:
+        response = client.post(
+            "/api/agents/agents/ai-sales/execute",
+            headers=headers_for(test_user),
+            json={
+                "task_id": "task-router-tool-1",
+                "agent_id": "ai-sales",
+                "org_id": test_org.id,
+                "input": {},
+                "context": {
+                    "org_id": "attacker-controlled-org",
+                    "user_id": "attacker-controlled-user",
+                },
+                "permissions": [
+                    "read_crm",
+                    "write_deals",
+                    "send_email",
+                ],
+                "authorization_required": False,
+            },
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+
+        assert body["status"] == "completed"
+        assert body["result"]["success"] is True
+        assert captured["org_id"] == test_user.org_id
+        assert captured["user_id"] == test_user.id
+
+    finally:
+        if original_agent is not None:
+            registry.register(original_agent)
