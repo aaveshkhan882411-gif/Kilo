@@ -1,8 +1,10 @@
+import json
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, List
 
 from app.agents.contracts import AGENT_CONTRACTS, AgentContract
 from app.agents.tool_registry import tool_registry
+from app.ai.router import ModelRouter
 
 
 class BaseAgent:
@@ -27,16 +29,145 @@ class BaseAgent:
         return context
 
     async def reason(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        return {
-            "reasoning": "Agent reasoning is not implemented by a model runtime yet.",
-            "context": context,
+        contract = self.get_contract()
+
+        if contract is None:
+            return {
+                "error": "Agent contract not found",
+                "model_response": "",
+            }
+
+        model_context = {
+            "input": context.get("input", {}),
+            "agent": {
+                "id": self.agent_id,
+                "name": self.name,
+            },
+            "contract": {
+                "allowed_tools": list(contract.allowed_tools),
+                "required_permissions": list(contract.required_permissions),
+                "capabilities": list(contract.capabilities),
+            },
         }
 
+        try:
+            response = await ModelRouter.complete(
+                prompt="",
+                agent_id=self.agent_id,
+                max_tokens=1024,
+                temperature=0.2,
+                context=model_context,
+            )
+
+            if not isinstance(response, dict):
+                return {
+                    "error": "Invalid model response",
+                    "model_response": "",
+                }
+
+            if response.get("error"):
+                return {
+                    "error": response.get("error"),
+                    "model_response": "",
+                }
+
+            return {
+                "reasoning": response.get("text", ""),
+                "model": response.get("model"),
+                "tokens_used": response.get("tokens_used"),
+                "model_response": response.get("text", ""),
+            }
+
+        except Exception:
+            return {
+                "error": "Model runtime failed",
+                "model_response": "",
+            }
+
     async def create_plan(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        raw_response = context.get("model_response") or context.get("reasoning", "")
+
+        if not isinstance(raw_response, str) or not raw_response.strip():
+            return {
+                "plan": [],
+                "requested_tool": None,
+                "parameters": {},
+            }
+
+        content = raw_response.strip()
+
+        if content.startswith("```") and content.endswith("```"):
+            lines = content.splitlines()
+
+            if lines:
+                lines = lines[1:]
+
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+
+            content = "\n".join(lines).strip()
+
+        try:
+            parsed = json.loads(content)
+        except (TypeError, ValueError):
+            return {
+                "plan": [],
+                "requested_tool": None,
+                "parameters": {},
+            }
+
+        if not isinstance(parsed, dict):
+            return {
+                "plan": [],
+                "requested_tool": None,
+                "parameters": {},
+            }
+
+        requested_tool = parsed.get("requested_tool")
+
+        if requested_tool is not None and not isinstance(requested_tool, str):
+            requested_tool = None
+
+        parameters = parsed.get("parameters", {})
+
+        if not isinstance(parameters, dict):
+            parameters = {}
+
+        contract = self.get_contract()
+
+        if (
+            requested_tool is not None
+            and (
+                contract is None
+                or requested_tool not in contract.allowed_tools
+            )
+        ):
+            requested_tool = None
+            parameters = {}
+
+        blocked_keys = {
+            "org_id",
+            "user_id",
+            "permissions",
+            "authorization",
+            "authorization_token",
+            "access_token",
+            "refresh_token",
+            "token",
+            "api_key",
+        }
+
+        parameters = {
+            key: value
+            for key, value in parameters.items()
+            if key not in blocked_keys
+        }
+
         return {
-            "plan": [],
-            "requested_tool": None,
-            "parameters": {},
+            "plan": parsed.get("plan", []),
+            "requested_tool": requested_tool,
+            "parameters": parameters,
+            "reasoning": parsed.get("reasoning", ""),
         }
 
     async def check_permissions(self, context: Dict[str, Any]) -> bool:
@@ -108,7 +239,13 @@ class BaseAgent:
 
         context = await self.load_context(context)
         reasoning = await self.reason(context)
-        plan = await self.create_plan(reasoning)
+
+        planning_context = {
+            **context,
+            **reasoning,
+        }
+
+        plan = await self.create_plan(planning_context)
 
         permission_context = {
             **context,

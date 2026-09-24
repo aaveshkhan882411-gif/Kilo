@@ -26,5 +26,31 @@ PROMPTS = {
 
 
 def get_prompt(agent_id: str, context: Dict[str, Any]) -> str:
-    template = PROMPTS.get(agent_id, Template("You are an AI agent. Handle: $context"))
-    return template.safe_substitute(context=str(context))
+    template = PROMPTS.get(
+        agent_id,
+        Template("You are an AI agent. Handle: $context"),
+    )
+
+    base_prompt = template.safe_substitute(context=str(context))
+
+    return f"""
+{base_prompt}
+
+You are operating inside GrowthAI's controlled agent runtime.
+
+Return ONLY valid JSON. Do not use Markdown fences.
+
+Required JSON shape:
+{{
+  "reasoning": "brief explanation of the decision",
+  "requested_tool": "one allowed tool name or null",
+  "parameters": {{}}
+}}
+
+Rules:
+- Never invent a tool name.
+- If no tool is necessary, use null for requested_tool.
+- parameters must always be a JSON object.
+- Do not include org_id, user_id, permissions, authorization tokens, or other security fields in parameters.
+- The runtime, not the model, controls authorization, tenant isolation, and permission checks.
+""".strip()

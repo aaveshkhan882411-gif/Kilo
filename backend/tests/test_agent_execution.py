@@ -194,3 +194,182 @@ async def test_agent_execution_runs_registered_tool_with_authenticated_tenant_co
     finally:
         if original_agent is not None:
             registry.register(original_agent)
+
+
+@pytest.mark.asyncio
+async def test_base_agent_reason_calls_model_router(monkeypatch):
+    from app.agents.base import BaseAgent
+    from app.ai.router import ModelRouter
+
+    agent = BaseAgent("ai-sales", "AI Sales")
+    captured = {}
+
+    async def fake_complete(
+        prompt,
+        agent_id=None,
+        model=None,
+        max_tokens=1024,
+        temperature=0.7,
+        context=None,
+    ):
+        captured["prompt"] = prompt
+        captured["agent_id"] = agent_id
+        captured["max_tokens"] = max_tokens
+        captured["temperature"] = temperature
+        captured["context"] = context
+
+        return {
+            "text": '{"reasoning":"use CRM","requested_tool":"crm","parameters":{}}',
+            "model": "test-model",
+            "tokens_used": 12,
+        }
+
+    monkeypatch.setattr(ModelRouter, "complete", fake_complete)
+
+    result = await agent.reason(
+        {
+            "input": {"lead_id": "lead-1"},
+            "org_id": "attacker-org",
+            "user_id": "attacker-user",
+            "permissions": ["read_crm"],
+        }
+    )
+
+    assert result["model_response"]
+    assert captured["agent_id"] == "ai-sales"
+    assert captured["max_tokens"] == 1024
+    assert captured["temperature"] == 0.2
+
+    assert captured["context"]["agent"]["id"] == "ai-sales"
+    assert "crm" in captured["context"]["contract"]["allowed_tools"]
+    assert "read_crm" in captured["context"]["contract"]["required_permissions"]
+
+    # Security-sensitive runtime values must not be forwarded to the model context.
+    assert "org_id" not in captured["context"]
+    assert "user_id" not in captured["context"]
+    assert "permissions" not in captured["context"]
+
+
+@pytest.mark.asyncio
+async def test_base_agent_create_plan_parses_valid_json():
+    from app.agents.base import BaseAgent
+
+    agent = BaseAgent("ai-sales", "AI Sales")
+
+    result = await agent.create_plan(
+        {
+            "model_response": (
+                '{"reasoning":"use crm",'
+                '"requested_tool":"crm",'
+                '"parameters":{"lead_id":"lead-1"}}'
+            )
+        }
+    )
+
+    assert result["requested_tool"] == "crm"
+    assert result["parameters"] == {"lead_id": "lead-1"}
+    assert result["reasoning"] == "use crm"
+
+
+@pytest.mark.asyncio
+async def test_base_agent_create_plan_parses_fenced_json():
+    from app.agents.base import BaseAgent
+
+    agent = BaseAgent("ai-sales", "AI Sales")
+
+    result = await agent.create_plan(
+        {
+            "model_response": """```json
+{"reasoning":"use crm","requested_tool":"crm","parameters":{"lead_id":"lead-1"}}
+```"""
+        }
+    )
+
+    assert result["requested_tool"] == "crm"
+    assert result["parameters"] == {"lead_id": "lead-1"}
+
+
+@pytest.mark.asyncio
+async def test_base_agent_create_plan_rejects_malformed_json():
+    from app.agents.base import BaseAgent
+
+    agent = BaseAgent("ai-sales", "AI Sales")
+
+    result = await agent.create_plan(
+        {
+            "model_response": "this is not json"
+        }
+    )
+
+    assert result["requested_tool"] is None
+    assert result["parameters"] == {}
+
+
+@pytest.mark.asyncio
+async def test_base_agent_create_plan_rejects_disallowed_tool():
+    from app.agents.base import BaseAgent
+
+    agent = BaseAgent("ai-sales", "AI Sales")
+
+    result = await agent.create_plan(
+        {
+            "model_response": (
+                '{"reasoning":"attack",'
+                '"requested_tool":"database",'
+                '"parameters":{"query":"secret"}}'
+            )
+        }
+    )
+
+    assert result["requested_tool"] is None
+    assert result["parameters"] == {}
+
+
+@pytest.mark.asyncio
+async def test_base_agent_create_plan_strips_security_parameters():
+    from app.agents.base import BaseAgent
+
+    agent = BaseAgent("ai-sales", "AI Sales")
+
+    result = await agent.create_plan(
+        {
+            "model_response": (
+                '{"reasoning":"crm",'
+                '"requested_tool":"crm",'
+                '"parameters":{'
+                '"lead_id":"lead-1",'
+                '"org_id":"attacker-org",'
+                '"user_id":"attacker-user",'
+                '"permissions":["read_all"],'
+                '"authorization":"true",'
+                '"access_token":"secret",'
+                '"token":"secret",'
+                '"api_key":"secret"'
+                '}}'
+            )
+        }
+    )
+
+    assert result["requested_tool"] == "crm"
+    assert result["parameters"] == {"lead_id": "lead-1"}
+
+
+@pytest.mark.asyncio
+async def test_base_agent_reason_handles_model_failure(monkeypatch):
+    from app.agents.base import BaseAgent
+    from app.ai.router import ModelRouter
+
+    agent = BaseAgent("ai-sales", "AI Sales")
+
+    async def fake_complete(*args, **kwargs):
+        return {
+            "error": "vllm_connection_error",
+            "provider": "vllm",
+        }
+
+    monkeypatch.setattr(ModelRouter, "complete", fake_complete)
+
+    result = await agent.reason({"input": {"lead_id": "lead-1"}})
+
+    assert result["error"] == "vllm_connection_error"
+    assert result["model_response"] == ""
