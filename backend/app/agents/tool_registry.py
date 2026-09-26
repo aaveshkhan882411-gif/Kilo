@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Awaitable, Callable, Dict, Optional, Set
 
 from sqlalchemy import select
@@ -7,7 +8,8 @@ from sqlalchemy import select
 from app.agents.contracts import AGENT_CONTRACTS
 from app.database import async_session_factory
 from app.integrations.email import EmailIntegration
-from app.models import Lead
+from app.models import Appointment, Contact, Lead, User
+from app.services.audit_service import AuditService
 
 
 ToolHandler = Callable[[Dict[str, Any]], Awaitable[Dict[str, Any]]]
@@ -253,6 +255,271 @@ async def _crm_lead_tool(params: Dict[str, Any]) -> Dict[str, Any]:
         }
 
 
+async def _calendar_tool(params: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Production GrowthAI calendar tool backed by the tenant-safe
+    appointments table.
+
+    Security boundary:
+    - org_id and user_id come only from trusted runtime context.
+    - The model cannot choose another tenant or organizer.
+    - attendee and lead references are verified inside the same tenant.
+    - Permission enforcement remains in ToolRegistry.
+    """
+    context = params.get("_execution_context")
+
+    if not isinstance(context, dict):
+        return {
+            "success": False,
+            "status": "invalid_execution_context",
+            "tool": "calendar",
+            "error": "Trusted execution context is required",
+        }
+
+    org_id = context.get("org_id")
+    user_id = context.get("user_id")
+
+    if not isinstance(org_id, str) or not org_id:
+        return {
+            "success": False,
+            "status": "invalid_execution_context",
+            "tool": "calendar",
+            "error": "Execution context must contain a valid org_id",
+        }
+
+    if not isinstance(user_id, str) or not user_id:
+        return {
+            "success": False,
+            "status": "invalid_execution_context",
+            "tool": "calendar",
+            "error": "Execution context must contain a valid user_id",
+        }
+
+    action = params.get("action", "list_appointments")
+
+    if action not in {"create_appointment", "list_appointments"}:
+        return {
+            "success": False,
+            "status": "invalid_tool_action",
+            "tool": "calendar",
+            "error": "Calendar tool supports only create_appointment and list_appointments",
+        }
+
+    async with async_session_factory() as db:
+        if action == "create_appointment":
+            title = params.get("title")
+            start_time = params.get("start_time")
+            end_time = params.get("end_time")
+            description = params.get("description")
+            location = params.get("location")
+            attendee_id = params.get("attendee_id")
+            lead_id = params.get("lead_id")
+            appointment_status = params.get("status", "scheduled")
+
+            if not isinstance(title, str) or not title.strip():
+                return {
+                    "success": False,
+                    "status": "invalid_parameters",
+                    "tool": "calendar",
+                    "error": "title is required",
+                }
+
+            if not isinstance(start_time, str) or not start_time.strip():
+                return {
+                    "success": False,
+                    "status": "invalid_parameters",
+                    "tool": "calendar",
+                    "error": "start_time is required",
+                }
+
+            if not isinstance(end_time, str) or not end_time.strip():
+                return {
+                    "success": False,
+                    "status": "invalid_parameters",
+                    "tool": "calendar",
+                    "error": "end_time is required",
+                }
+
+            try:
+                parsed_start = datetime.fromisoformat(start_time)
+                parsed_end = datetime.fromisoformat(end_time)
+            except ValueError:
+                return {
+                    "success": False,
+                    "status": "invalid_parameters",
+                    "tool": "calendar",
+                    "error": "start_time and end_time must be valid ISO-8601 datetimes",
+                }
+
+            if parsed_end <= parsed_start:
+                return {
+                    "success": False,
+                    "status": "invalid_parameters",
+                    "tool": "calendar",
+                    "error": "end_time must be after start_time",
+                }
+
+            organizer_result = await db.execute(
+                select(User).where(
+                    User.id == user_id,
+                    User.org_id == org_id,
+                    User.is_active.is_(True),
+                )
+            )
+
+            if organizer_result.scalar_one_or_none() is None:
+                return {
+                    "success": False,
+                    "status": "not_found",
+                    "tool": "calendar",
+                    "error": "Organizer user not found",
+                }
+
+            if attendee_id is not None:
+                if not isinstance(attendee_id, str) or not attendee_id:
+                    return {
+                        "success": False,
+                        "status": "invalid_parameters",
+                        "tool": "calendar",
+                        "error": "attendee_id must be a valid contact id",
+                    }
+
+                contact_result = await db.execute(
+                    select(Contact).where(
+                        Contact.id == attendee_id,
+                        Contact.org_id == org_id,
+                    )
+                )
+
+                if contact_result.scalar_one_or_none() is None:
+                    return {
+                        "success": False,
+                        "status": "not_found",
+                        "tool": "calendar",
+                        "error": "Attendee contact not found",
+                    }
+
+            if lead_id is not None:
+                if not isinstance(lead_id, str) or not lead_id:
+                    return {
+                        "success": False,
+                        "status": "invalid_parameters",
+                        "tool": "calendar",
+                        "error": "lead_id must be a valid lead id",
+                    }
+
+                lead_result = await db.execute(
+                    select(Lead).where(
+                        Lead.id == lead_id,
+                        Lead.org_id == org_id,
+                    )
+                )
+
+                if lead_result.scalar_one_or_none() is None:
+                    return {
+                        "success": False,
+                        "status": "not_found",
+                        "tool": "calendar",
+                        "error": "Lead not found",
+                    }
+
+            appointment = Appointment(
+                org_id=org_id,
+                title=title.strip(),
+                description=description if isinstance(description, str) else None,
+                start_time=parsed_start,
+                end_time=parsed_end,
+                location=location if isinstance(location, str) else None,
+                organizer_id=user_id,
+                attendee_id=attendee_id,
+                lead_id=lead_id,
+                status=appointment_status if isinstance(appointment_status, str) else "scheduled",
+            )
+
+            db.add(appointment)
+            await db.flush()
+
+            await AuditService.record(
+                db=db,
+                org_id=org_id,
+                user_id=user_id,
+                action="CREATE",
+                entity_type="appointment",
+                entity_id=appointment.id,
+                changes={
+                    "title": appointment.title,
+                    "start_time": parsed_start.isoformat(),
+                    "end_time": parsed_end.isoformat(),
+                    "attendee_id": attendee_id,
+                    "lead_id": lead_id,
+                },
+            )
+
+            await db.commit()
+            await db.refresh(appointment)
+
+            return {
+                "success": True,
+                "status": "executed",
+                "tool": "calendar",
+                "action": "create_appointment",
+                "appointment": {
+                    "id": appointment.id,
+                    "org_id": appointment.org_id,
+                    "title": appointment.title,
+                    "description": appointment.description,
+                    "start_time": appointment.start_time.isoformat(),
+                    "end_time": appointment.end_time.isoformat(),
+                    "location": appointment.location,
+                    "organizer_id": appointment.organizer_id,
+                    "attendee_id": appointment.attendee_id,
+                    "lead_id": appointment.lead_id,
+                    "status": appointment.status,
+                },
+            }
+
+        raw_limit = params.get("limit", 20)
+
+        try:
+            limit = int(raw_limit)
+        except (TypeError, ValueError):
+            limit = 20
+
+        limit = max(1, min(limit, 50))
+
+        result = await db.execute(
+            select(Appointment)
+            .where(Appointment.org_id == org_id)
+            .order_by(Appointment.start_time.asc())
+            .limit(limit)
+        )
+
+        appointments = result.scalars().all()
+
+        return {
+            "success": True,
+            "status": "executed",
+            "tool": "calendar",
+            "action": "list_appointments",
+            "count": len(appointments),
+            "appointments": [
+                {
+                    "id": appointment.id,
+                    "title": appointment.title,
+                    "description": appointment.description,
+                    "start_time": appointment.start_time.isoformat(),
+                    "end_time": appointment.end_time.isoformat(),
+                    "location": appointment.location,
+                    "organizer_id": appointment.organizer_id,
+                    "attendee_id": appointment.attendee_id,
+                    "lead_id": appointment.lead_id,
+                    "status": appointment.status,
+                }
+                for appointment in appointments
+            ],
+        }
+
+
 async def _email_tool(params: Dict[str, Any]) -> Dict[str, Any]:
     """
     Production email tool backed by the existing EmailIntegration.
@@ -348,3 +615,4 @@ tool_registry = ToolRegistry()
 # Built-in production tools.
 tool_registry.register("crm", _crm_lead_tool)
 tool_registry.register("email", _email_tool)
+tool_registry.register("calendar", _calendar_tool)

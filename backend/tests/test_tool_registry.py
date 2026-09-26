@@ -70,13 +70,16 @@ async def test_registered_tool_executes_through_registry():
 
 
 @pytest.mark.asyncio
-async def test_allowed_unregistered_tool_is_not_executed():
+async def test_registered_calendar_tool_is_executed():
     from app.agents.tool_registry import tool_registry
 
     result = await tool_registry.execute(
         agent_id="ai-sales",
         tool="calendar",
-        params={},
+        params={
+            "action": "list_appointments",
+            "limit": 10,
+        },
         permissions=[
             "read_crm",
             "write_deals",
@@ -88,8 +91,10 @@ async def test_allowed_unregistered_tool_is_not_executed():
         },
     )
 
-    assert result["success"] is False
-    assert result["status"] == "tool_not_registered"
+    assert result["success"] is True
+    assert result["status"] == "executed"
+    assert result["tool"] == "calendar"
+    assert result["action"] == "list_appointments"
 
 
 @pytest.mark.asyncio
@@ -594,3 +599,340 @@ async def test_email_tool_requires_send_email_permission():
 
     assert result["success"] is False
     assert result["status"] == "permission_denied"
+
+
+@pytest.mark.asyncio
+async def test_calendar_tool_requires_trusted_execution_context():
+    from app.agents.tool_registry import tool_registry
+
+    result = await tool_registry.execute(
+        agent_id="ai-sales",
+        tool="calendar",
+        params={"action": "list_appointments"},
+        permissions=[
+            "read_crm",
+            "write_deals",
+            "send_email",
+        ],
+        context=None,
+    )
+
+    assert result["success"] is False
+    assert result["status"] == "execution_context_required"
+
+
+@pytest.mark.asyncio
+async def test_calendar_tool_rejects_invalid_action():
+    from app.agents.tool_registry import tool_registry
+
+    result = await tool_registry.execute(
+        agent_id="ai-sales",
+        tool="calendar",
+        params={"action": "delete_appointment"},
+        permissions=[
+            "read_crm",
+            "write_deals",
+            "send_email",
+        ],
+        context={
+            "org_id": "org-1",
+            "user_id": "user-1",
+        },
+    )
+
+    assert result["success"] is False
+    assert result["status"] == "invalid_tool_action"
+
+
+@pytest.mark.asyncio
+async def test_calendar_tool_rejects_invalid_times():
+    from app.agents.tool_registry import tool_registry
+
+    result = await tool_registry.execute(
+        agent_id="ai-sales",
+        tool="calendar",
+        params={
+            "action": "create_appointment",
+            "title": "Test appointment",
+            "start_time": "2026-09-26T15:00:00",
+            "end_time": "2026-09-26T14:00:00",
+        },
+        permissions=[
+            "read_crm",
+            "write_deals",
+            "send_email",
+        ],
+        context={
+            "org_id": "org-1",
+            "user_id": "user-1",
+        },
+    )
+
+    assert result["success"] is False
+    assert result["status"] == "invalid_parameters"
+    assert "end_time must be after start_time" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_calendar_tool_rejects_cross_tenant_attendee():
+    from app.agents.tool_registry import _calendar_tool, tool_registry
+
+    tool_registry.register("calendar", _calendar_tool)
+
+    class FakeScalarResult:
+        def __init__(self, value):
+            self.value = value
+
+        def scalar_one_or_none(self):
+            return self.value
+
+    class FakeOrganizer:
+        id = "user-a"
+
+    class FakeDB:
+        def __init__(self):
+            self.calls = 0
+
+        async def execute(self, query):
+            self.calls += 1
+            if self.calls == 1:
+                return FakeScalarResult(FakeOrganizer())
+            return FakeScalarResult(None)
+
+    class FakeSession:
+        async def __aenter__(self):
+            return FakeDB()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    from unittest.mock import patch
+
+    with patch(
+        "app.agents.tool_registry.async_session_factory",
+        return_value=FakeSession(),
+    ):
+        result = await _calendar_tool(
+            {
+                "_execution_context": {
+                    "org_id": "org-a",
+                    "user_id": "user-a",
+                },
+                "action": "create_appointment",
+                "title": "Cross tenant test",
+                "start_time": "2026-09-26T15:00:00",
+                "end_time": "2026-09-26T16:00:00",
+                "attendee_id": "contact-from-org-b",
+            }
+        )
+
+    assert result["success"] is False
+    assert result["status"] == "not_found"
+    assert result["error"] == "Attendee contact not found"
+
+
+@pytest.mark.asyncio
+async def test_calendar_tool_rejects_cross_tenant_lead():
+    from app.agents.tool_registry import _calendar_tool, tool_registry
+
+    tool_registry.register("calendar", _calendar_tool)
+
+    class FakeScalarResult:
+        def __init__(self, value):
+            self.value = value
+
+        def scalar_one_or_none(self):
+            return self.value
+
+    class FakeOrganizer:
+        id = "user-a"
+
+    class FakeDB:
+        def __init__(self):
+            self.calls = 0
+
+        async def execute(self, query):
+            self.calls += 1
+            if self.calls == 1:
+                return FakeScalarResult(FakeOrganizer())
+            return FakeScalarResult(None)
+
+    class FakeSession:
+        async def __aenter__(self):
+            return FakeDB()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    from unittest.mock import patch
+
+    with patch(
+        "app.agents.tool_registry.async_session_factory",
+        return_value=FakeSession(),
+    ):
+        result = await _calendar_tool(
+            {
+                "_execution_context": {
+                    "org_id": "org-a",
+                    "user_id": "user-a",
+                },
+                "action": "create_appointment",
+                "title": "Cross tenant lead test",
+                "start_time": "2026-09-26T15:00:00",
+                "end_time": "2026-09-26T16:00:00",
+                "lead_id": "lead-from-org-b",
+            }
+        )
+
+    assert result["success"] is False
+    assert result["status"] == "not_found"
+    assert result["error"] == "Lead not found"
+
+
+@pytest.mark.asyncio
+async def test_calendar_tool_creates_appointment_and_audit_log():
+    from datetime import datetime
+    from unittest.mock import patch
+
+    from app.agents.tool_registry import _calendar_tool, tool_registry
+    from app.services.audit_service import AuditService
+
+    tool_registry.register("calendar", _calendar_tool)
+
+    class FakeScalarResult:
+        def scalar_one_or_none(self):
+            class FakeOrganizer:
+                id = "user-a"
+            return FakeOrganizer()
+
+    class FakeDB:
+        def add(self, obj):
+            self.appointment = obj
+
+        async def execute(self, query):
+            return FakeScalarResult()
+
+        async def flush(self):
+            self.appointment.id = "appointment-test-1"
+
+        async def commit(self):
+            pass
+
+        async def refresh(self, obj):
+            pass
+
+    class FakeSession:
+        async def __aenter__(self):
+            self.db = FakeDB()
+            return self.db
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    audit_calls = []
+
+    async def fake_audit(**kwargs):
+        audit_calls.append(kwargs)
+
+    with patch(
+        "app.agents.tool_registry.async_session_factory",
+        return_value=FakeSession(),
+    ), patch.object(
+        AuditService,
+        "record",
+        side_effect=fake_audit,
+    ):
+        result = await _calendar_tool(
+            {
+                "_execution_context": {
+                    "org_id": "org-a",
+                    "user_id": "user-a",
+                },
+                "action": "create_appointment",
+                "title": "Demo call",
+                "description": "GrowthAI demo",
+                "start_time": "2026-09-26T15:00:00",
+                "end_time": "2026-09-26T16:00:00",
+                "location": "Online",
+            }
+        )
+
+    assert result["success"] is True
+    assert result["status"] == "executed"
+    assert result["tool"] == "calendar"
+    assert result["action"] == "create_appointment"
+
+    appointment = result["appointment"]
+
+    assert appointment["id"] == "appointment-test-1"
+    assert appointment["org_id"] == "org-a"
+    assert appointment["title"] == "Demo call"
+    assert appointment["organizer_id"] == "user-a"
+
+    assert len(audit_calls) == 1
+    assert audit_calls[0]["org_id"] == "org-a"
+    assert audit_calls[0]["user_id"] == "user-a"
+    assert audit_calls[0]["action"] == "CREATE"
+    assert audit_calls[0]["entity_type"] == "appointment"
+    assert audit_calls[0]["entity_id"] == "appointment-test-1"
+
+
+@pytest.mark.asyncio
+async def test_calendar_tool_lists_only_current_tenant_appointments():
+    from datetime import datetime
+    from unittest.mock import patch
+
+    from app.agents.tool_registry import _calendar_tool, tool_registry
+
+    tool_registry.register("calendar", _calendar_tool)
+
+    class AppointmentRow:
+        id = "appointment-org-a"
+        title = "Tenant A appointment"
+        description = None
+        start_time = datetime.fromisoformat("2026-09-26T15:00:00")
+        end_time = datetime.fromisoformat("2026-09-26T16:00:00")
+        location = None
+        organizer_id = "user-a"
+        attendee_id = None
+        lead_id = None
+        status = "scheduled"
+
+    class FakeScalars:
+        def all(self):
+            return [AppointmentRow()]
+
+    class FakeResult:
+        def scalars(self):
+            return FakeScalars()
+
+    class FakeDB:
+        async def execute(self, query):
+            return FakeResult()
+
+    class FakeSession:
+        async def __aenter__(self):
+            return FakeDB()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    with patch(
+        "app.agents.tool_registry.async_session_factory",
+        return_value=FakeSession(),
+    ):
+        result = await _calendar_tool(
+            {
+                "_execution_context": {
+                    "org_id": "org-a",
+                    "user_id": "user-a",
+                },
+                "action": "list_appointments",
+                "limit": 20,
+            }
+        )
+
+    assert result["success"] is True
+    assert result["count"] == 1
+    assert result["appointments"][0]["id"] == "appointment-org-a"
+    assert result["appointments"][0]["title"] == "Tenant A appointment"
