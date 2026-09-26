@@ -6,6 +6,7 @@ from sqlalchemy import select
 
 from app.agents.contracts import AGENT_CONTRACTS
 from app.database import async_session_factory
+from app.integrations.email import EmailIntegration
 from app.models import Lead
 
 
@@ -252,7 +253,98 @@ async def _crm_lead_tool(params: Dict[str, Any]) -> Dict[str, Any]:
         }
 
 
+async def _email_tool(params: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Production email tool backed by the existing EmailIntegration.
+
+    Security boundary:
+    - The execution context is trusted runtime data.
+    - The model cannot select or modify the tenant context.
+    - Email sending still requires the agent contract's send_email permission.
+    - SMTP credentials remain inside EmailIntegration/settings.
+    """
+    context = params.get("_execution_context")
+
+    if not isinstance(context, dict):
+        return {
+            "success": False,
+            "status": "invalid_execution_context",
+            "error": "Trusted execution context is required",
+        }
+
+    org_id = context.get("org_id")
+
+    if not isinstance(org_id, str) or not org_id:
+        return {
+            "success": False,
+            "status": "invalid_execution_context",
+            "error": "Execution context must contain a valid org_id",
+        }
+
+    to = params.get("to")
+    subject = params.get("subject")
+    body = params.get("body")
+    html = params.get("html")
+
+    if not isinstance(to, str) or not to.strip():
+        return {
+            "success": False,
+            "status": "invalid_parameters",
+            "tool": "email",
+            "error": "to is required",
+        }
+
+    if not isinstance(subject, str) or not subject.strip():
+        return {
+            "success": False,
+            "status": "invalid_parameters",
+            "tool": "email",
+            "error": "subject is required",
+        }
+
+    if not isinstance(body, str) or not body.strip():
+        return {
+            "success": False,
+            "status": "invalid_parameters",
+            "tool": "email",
+            "error": "body is required",
+        }
+
+    if html is not None and not isinstance(html, str):
+        return {
+            "success": False,
+            "status": "invalid_parameters",
+            "tool": "email",
+            "error": "html must be a string when provided",
+        }
+
+    integration = EmailIntegration()
+
+    result = await integration.send_email(
+        to=to.strip(),
+        subject=subject.strip(),
+        body=body,
+        html=html,
+    )
+
+    if not result.success:
+        return {
+            "success": False,
+            "status": "email_send_failed",
+            "tool": "email",
+            "error": result.error or "Email delivery failed",
+        }
+
+    return {
+        "success": True,
+        "status": "executed",
+        "tool": "email",
+        "data": result.data or {},
+    }
+
+
 tool_registry = ToolRegistry()
 
 # Built-in production tools.
 tool_registry.register("crm", _crm_lead_tool)
+tool_registry.register("email", _email_tool)

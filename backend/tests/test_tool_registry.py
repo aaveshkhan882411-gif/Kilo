@@ -436,3 +436,161 @@ async def test_builtin_crm_tool_caps_list_limit(
     assert result["success"] is True
     assert result["count"] == 50
     assert len(result["leads"]) == 50
+
+
+@pytest.mark.asyncio
+async def test_builtin_email_tool_sends_through_email_integration(monkeypatch):
+    from app.agents import tool_registry as tool_registry_module
+    from app.agents.tool_registry import _email_tool, tool_registry
+    from app.integrations.base import IntegrationResult
+
+    class FakeEmailIntegration:
+        async def send_email(self, to, subject, body, html=None):
+            assert to == "customer@example.com"
+            assert subject == "Welcome"
+            assert body == "Hello from GrowthAI"
+            assert html == "<p>Hello from GrowthAI</p>"
+
+            return IntegrationResult(
+                success=True,
+                data={"message_id": "test-message-1"},
+            )
+
+    monkeypatch.setattr(
+        tool_registry_module,
+        "EmailIntegration",
+        FakeEmailIntegration,
+    )
+
+    tool_registry.register("email", _email_tool)
+
+    result = await tool_registry.execute(
+        agent_id="ai-email",
+        tool="email",
+        params={
+            "to": "  customer@example.com  ",
+            "subject": "  Welcome  ",
+            "body": "Hello from GrowthAI",
+            "html": "<p>Hello from GrowthAI</p>",
+        },
+        permissions=["read_crm", "send_email"],
+        context={
+            "org_id": "org-email-test",
+            "user_id": "user-email-test",
+            "permissions": ["read_crm", "send_email"],
+        },
+    )
+
+    assert result["success"] is True
+    assert result["status"] == "executed"
+    assert result["tool"] == "email"
+    assert result["data"]["message_id"] == "test-message-1"
+
+
+@pytest.mark.asyncio
+async def test_builtin_email_tool_rejects_missing_required_parameters():
+    from app.agents.tool_registry import _email_tool
+
+    context = {"org_id": "org-email-test"}
+
+    missing_to = await _email_tool(
+        {
+            "subject": "Hello",
+            "body": "Test",
+            "_execution_context": context,
+        }
+    )
+    assert missing_to["status"] == "invalid_parameters"
+
+    missing_subject = await _email_tool(
+        {
+            "to": "customer@example.com",
+            "body": "Test",
+            "_execution_context": context,
+        }
+    )
+    assert missing_subject["status"] == "invalid_parameters"
+
+    missing_body = await _email_tool(
+        {
+            "to": "customer@example.com",
+            "subject": "Hello",
+            "_execution_context": context,
+        }
+    )
+    assert missing_body["status"] == "invalid_parameters"
+
+
+@pytest.mark.asyncio
+async def test_builtin_email_tool_requires_trusted_context():
+    from app.agents.tool_registry import _email_tool
+
+    result = await _email_tool(
+        {
+            "to": "customer@example.com",
+            "subject": "Hello",
+            "body": "Test",
+        }
+    )
+
+    assert result["success"] is False
+    assert result["status"] == "invalid_execution_context"
+
+
+@pytest.mark.asyncio
+async def test_builtin_email_tool_handles_integration_failure(monkeypatch):
+    from app.agents import tool_registry as tool_registry_module
+    from app.agents.tool_registry import _email_tool
+    from app.integrations.base import IntegrationResult
+
+    class FakeEmailIntegration:
+        async def send_email(self, to, subject, body, html=None):
+            return IntegrationResult(
+                success=False,
+                error="NOT_CONFIGURED",
+            )
+
+    monkeypatch.setattr(
+        tool_registry_module,
+        "EmailIntegration",
+        FakeEmailIntegration,
+    )
+
+    result = await _email_tool(
+        {
+            "to": "customer@example.com",
+            "subject": "Hello",
+            "body": "Test",
+            "_execution_context": {
+                "org_id": "org-email-test",
+            },
+        }
+    )
+
+    assert result["success"] is False
+    assert result["status"] == "email_send_failed"
+    assert result["tool"] == "email"
+    assert result["error"] == "NOT_CONFIGURED"
+
+
+@pytest.mark.asyncio
+async def test_email_tool_requires_send_email_permission():
+    from app.agents.tool_registry import tool_registry
+
+    result = await tool_registry.execute(
+        agent_id="ai-email",
+        tool="email",
+        params={
+            "to": "customer@example.com",
+            "subject": "Hello",
+            "body": "Test",
+        },
+        permissions=["read_crm"],
+        context={
+            "org_id": "org-email-test",
+            "user_id": "user-email-test",
+        },
+    )
+
+    assert result["success"] is False
+    assert result["status"] == "permission_denied"
