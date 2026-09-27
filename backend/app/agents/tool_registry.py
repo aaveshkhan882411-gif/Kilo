@@ -8,7 +8,7 @@ from sqlalchemy import select
 from app.agents.contracts import AGENT_CONTRACTS
 from app.database import async_session_factory
 from app.integrations.email import EmailIntegration
-from app.models import Appointment, Contact, Lead, User
+from app.models import Appointment, Contact, Lead, User, Workflow
 from app.services.audit_service import AuditService
 
 
@@ -610,9 +610,121 @@ async def _email_tool(params: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+async def _workflow_tool(params: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Tenant-safe workflow tool.
+
+    The workflow ID and execution context are trusted runtime inputs.
+    The workflow definition itself is always loaded by org_id from the
+    authenticated agent execution context.
+    """
+    context = params.get("_execution_context") or {}
+    org_id = context.get("org_id")
+
+    if not org_id:
+        return {
+            "success": False,
+            "status": "invalid_execution_context",
+            "tool": "workflow",
+            "error": "org_id is required in execution context",
+        }
+
+    action = params.get("action", "get_workflow")
+
+    if action not in {"get_workflow", "list_workflows"}:
+        return {
+            "success": False,
+            "status": "unsupported_action",
+            "tool": "workflow",
+            "error": "Workflow tool supports only get_workflow and list_workflows",
+        }
+
+    async with async_session_factory() as db:
+        if action == "get_workflow":
+            workflow_id = params.get("workflow_id")
+
+            if not isinstance(workflow_id, str) or not workflow_id.strip():
+                return {
+                    "success": False,
+                    "status": "invalid_parameters",
+                    "tool": "workflow",
+                    "error": "workflow_id is required",
+                }
+
+            result = await db.execute(
+                select(Workflow).where(
+                    Workflow.id == workflow_id.strip(),
+                    Workflow.org_id == org_id,
+                )
+            )
+            workflow = result.scalar_one_or_none()
+
+            if workflow is None:
+                return {
+                    "success": False,
+                    "status": "not_found",
+                    "tool": "workflow",
+                    "error": "Workflow not found",
+                }
+
+            return {
+                "success": True,
+                "status": "executed",
+                "tool": "workflow",
+                "action": action,
+                "data": {
+                    "id": workflow.id,
+                    "org_id": workflow.org_id,
+                    "name": workflow.name,
+                    "trigger_type": workflow.trigger_type,
+                    "actions": workflow.actions,
+                    "is_active": workflow.is_active,
+                    "created_at": (
+                        workflow.created_at.isoformat()
+                        if workflow.created_at
+                        else None
+                    ),
+                    "updated_at": (
+                        workflow.updated_at.isoformat()
+                        if workflow.updated_at
+                        else None
+                    ),
+                },
+            }
+
+        result = await db.execute(
+            select(Workflow)
+            .where(Workflow.org_id == org_id)
+            .order_by(Workflow.created_at.desc())
+        )
+        workflows = result.scalars().all()
+
+        return {
+            "success": True,
+            "status": "executed",
+            "tool": "workflow",
+            "action": action,
+            "data": {
+                "items": [
+                    {
+                        "id": workflow.id,
+                        "org_id": workflow.org_id,
+                        "name": workflow.name,
+                        "trigger_type": workflow.trigger_type,
+                        "actions": workflow.actions,
+                        "is_active": workflow.is_active,
+                    }
+                    for workflow in workflows
+                ],
+                "count": len(workflows),
+            },
+        }
+
+
 tool_registry = ToolRegistry()
 
 # Built-in production tools.
 tool_registry.register("crm", _crm_lead_tool)
 tool_registry.register("email", _email_tool)
 tool_registry.register("calendar", _calendar_tool)
+tool_registry.register("workflow", _workflow_tool)

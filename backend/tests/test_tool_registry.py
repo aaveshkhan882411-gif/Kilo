@@ -936,3 +936,180 @@ async def test_calendar_tool_lists_only_current_tenant_appointments():
     assert result["count"] == 1
     assert result["appointments"][0]["id"] == "appointment-org-a"
     assert result["appointments"][0]["title"] == "Tenant A appointment"
+
+
+@pytest.mark.asyncio
+async def test_builtin_workflow_tool_lists_only_current_tenant_workflows(
+    db,
+    test_org,
+    monkeypatch,
+):
+    from app.agents import tool_registry as tool_registry_module
+    from app.agents.tool_registry import _workflow_tool, tool_registry
+    from app.models import Organization, Workflow
+    from tests.conftest import TestingSessionFactory
+
+    monkeypatch.setattr(
+        tool_registry_module,
+        "async_session_factory",
+        TestingSessionFactory,
+    )
+
+    tool_registry.register("workflow", _workflow_tool)
+
+    org_b = Organization(
+        name="Other Workflow Org",
+        slug="other-workflow-org",
+        plan="standard",
+    )
+    db.add(org_b)
+    await db.commit()
+    await db.refresh(org_b)
+
+    workflow_a = Workflow(
+        org_id=test_org.id,
+        name="Visible Workflow",
+        trigger_type="lead_created",
+        actions=[{"type": "notify", "channel": "email"}],
+        is_active=True,
+    )
+    workflow_b = Workflow(
+        org_id=org_b.id,
+        name="Secret Workflow",
+        trigger_type="lead_created",
+        actions=[{"type": "notify", "channel": "email"}],
+        is_active=True,
+    )
+
+    db.add_all([workflow_a, workflow_b])
+    await db.commit()
+
+    result = await tool_registry.execute(
+        agent_id="ai-workflow",
+        tool="workflow",
+        params={"action": "list_workflows"},
+        permissions=["read_workflow", "write_workflow"],
+        context={
+            "org_id": test_org.id,
+            "user_id": "workflow-user",
+        },
+    )
+
+    assert result["success"] is True
+    assert result["status"] == "executed"
+    assert result["tool"] == "workflow"
+    assert result["action"] == "list_workflows"
+    assert result["data"]["count"] == 1
+    assert result["data"]["items"][0]["id"] == workflow_a.id
+    assert result["data"]["items"][0]["name"] == "Visible Workflow"
+
+
+@pytest.mark.asyncio
+async def test_builtin_workflow_tool_cannot_read_cross_tenant_workflow(
+    db,
+    test_org,
+    monkeypatch,
+):
+    from app.agents import tool_registry as tool_registry_module
+    from app.agents.tool_registry import _workflow_tool, tool_registry
+    from app.models import Organization, Workflow
+    from tests.conftest import TestingSessionFactory
+
+    monkeypatch.setattr(
+        tool_registry_module,
+        "async_session_factory",
+        TestingSessionFactory,
+    )
+
+    tool_registry.register("workflow", _workflow_tool)
+
+    org_b = Organization(
+        name="Hidden Workflow Org",
+        slug="hidden-workflow-org",
+        plan="standard",
+    )
+    db.add(org_b)
+    await db.commit()
+    await db.refresh(org_b)
+
+    workflow_b = Workflow(
+        org_id=org_b.id,
+        name="Secret Workflow",
+        trigger_type="lead_created",
+        actions=[{"type": "notify", "channel": "email"}],
+        is_active=True,
+    )
+    db.add(workflow_b)
+    await db.commit()
+    await db.refresh(workflow_b)
+
+    result = await tool_registry.execute(
+        agent_id="ai-workflow",
+        tool="workflow",
+        params={
+            "action": "get_workflow",
+            "workflow_id": workflow_b.id,
+        },
+        permissions=["read_workflow", "write_workflow"],
+        context={
+            "org_id": test_org.id,
+            "user_id": "workflow-user",
+        },
+    )
+
+    assert result["success"] is False
+    assert result["status"] == "not_found"
+
+
+@pytest.mark.asyncio
+async def test_workflow_tool_rejects_unsupported_action():
+    from app.agents.tool_registry import tool_registry
+
+    result = await tool_registry.execute(
+        agent_id="ai-workflow",
+        tool="workflow",
+        params={"action": "delete_workflow"},
+        permissions=["read_workflow", "write_workflow"],
+        context={
+            "org_id": "org-workflow-test",
+            "user_id": "user-workflow-test",
+        },
+    )
+
+    assert result["success"] is False
+    assert result["status"] == "unsupported_action"
+
+
+@pytest.mark.asyncio
+async def test_workflow_tool_requires_execution_context():
+    from app.agents.tool_registry import tool_registry
+
+    result = await tool_registry.execute(
+        agent_id="ai-workflow",
+        tool="workflow",
+        params={"action": "list_workflows"},
+        permissions=["read_workflow", "write_workflow"],
+        context=None,
+    )
+
+    assert result["success"] is False
+    assert result["status"] == "execution_context_required"
+
+
+@pytest.mark.asyncio
+async def test_workflow_tool_requires_workflow_permissions():
+    from app.agents.tool_registry import tool_registry
+
+    result = await tool_registry.execute(
+        agent_id="ai-workflow",
+        tool="workflow",
+        params={"action": "list_workflows"},
+        permissions=["read_crm"],
+        context={
+            "org_id": "org-workflow-test",
+            "user_id": "user-workflow-test",
+        },
+    )
+
+    assert result["success"] is False
+    assert result["status"] == "permission_denied"
