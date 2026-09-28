@@ -45,7 +45,15 @@ async def test_workflow_execution_loads_current_tenant_workflow(
         org_id=test_org.id,
         name="Lead Follow Up",
         trigger_type="lead_created",
-        actions=[{"type": "notify", "channel": "email"}],
+        actions=[
+                {
+                    "type": "notify",
+                    "channel": "email",
+                    "to": "customer@example.com",
+                    "subject": "New Lead",
+                    "body": "A new lead was created.",
+                }
+            ],
         is_active=True,
     )
     db.add(workflow)
@@ -178,3 +186,126 @@ async def test_workflow_execution_matches_trigger_type(
     assert result["status"] == "matched"
     assert result["count"] == 1
     assert result["workflows"][0]["id"] == matching.id
+
+
+@pytest.mark.asyncio
+async def test_workflow_execution_rejects_unsupported_action(
+    db,
+    test_org,
+    monkeypatch,
+):
+    from app.models import Workflow
+    from app.services import workflow_execution_service as service_module
+    from tests.conftest import TestingSessionFactory
+
+    monkeypatch.setattr(
+        service_module,
+        "async_session_factory",
+        TestingSessionFactory,
+    )
+
+    workflow = Workflow(
+        org_id=test_org.id,
+        name="Unsupported Action Workflow",
+        trigger_type="lead_created",
+        actions=[{"type": "unknown_action"}],
+        is_active=True,
+    )
+
+    db.add(workflow)
+    await db.commit()
+
+    result = await WorkflowExecutionService.execute(
+        workflow.id,
+        {"org_id": test_org.id},
+    )
+
+    assert result["success"] is False
+    assert result["status"] == "unsupported_action"
+
+
+@pytest.mark.asyncio
+async def test_workflow_execution_validates_email_action_parameters(
+    db,
+    test_org,
+    monkeypatch,
+):
+    from app.models import Workflow
+    from app.services import workflow_execution_service as service_module
+    from tests.conftest import TestingSessionFactory
+
+    monkeypatch.setattr(
+        service_module,
+        "async_session_factory",
+        TestingSessionFactory,
+    )
+
+    workflow = Workflow(
+        org_id=test_org.id,
+        name="Email Workflow",
+        trigger_type="lead_created",
+        actions=[
+            {
+                "type": "notify",
+                "channel": "email",
+                "to": "customer@example.com",
+                "subject": "New Lead",
+                "body": "A new lead was created.",
+            }
+        ],
+        is_active=True,
+    )
+
+    db.add(workflow)
+    await db.commit()
+
+    result = await WorkflowExecutionService.execute(
+        workflow.id,
+        {"org_id": test_org.id},
+    )
+
+    assert result["success"] is True
+    assert result["status"] == "loaded"
+    assert result["workflow"]["actions"][0]["to"] == "customer@example.com"
+
+
+@pytest.mark.asyncio
+async def test_workflow_execution_rejects_incomplete_email_action(
+    db,
+    test_org,
+    monkeypatch,
+):
+    from app.models import Workflow
+    from app.services import workflow_execution_service as service_module
+    from tests.conftest import TestingSessionFactory
+
+    monkeypatch.setattr(
+        service_module,
+        "async_session_factory",
+        TestingSessionFactory,
+    )
+
+    workflow = Workflow(
+        org_id=test_org.id,
+        name="Incomplete Email Workflow",
+        trigger_type="lead_created",
+        actions=[
+            {
+                "type": "notify",
+                "channel": "email",
+                "to": "customer@example.com",
+            }
+        ],
+        is_active=True,
+    )
+
+    db.add(workflow)
+    await db.commit()
+
+    result = await WorkflowExecutionService.execute(
+        workflow.id,
+        {"org_id": test_org.id},
+    )
+
+    assert result["success"] is False
+    assert result["status"] == "invalid_action"

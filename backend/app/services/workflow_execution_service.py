@@ -107,6 +107,46 @@ class WorkflowExecutionService:
                     "org_id": workflow.org_id,
                 }
 
+            actions = workflow.actions
+
+            if not isinstance(actions, list):
+                return {
+                    "success": False,
+                    "status": "invalid_actions",
+                    "workflow_id": workflow.id,
+                    "org_id": workflow.org_id,
+                }
+
+            for action in actions:
+                if not isinstance(action, dict):
+                    return {
+                        "success": False,
+                        "status": "invalid_action",
+                        "workflow_id": workflow.id,
+                        "org_id": workflow.org_id,
+                    }
+
+                if (
+                    action.get("type") != "notify"
+                    or action.get("channel") != "email"
+                ):
+                    return {
+                        "success": False,
+                        "status": "unsupported_action",
+                        "workflow_id": workflow.id,
+                        "org_id": workflow.org_id,
+                    }
+
+
+                for field in ("to", "subject", "body"):
+                    value = action.get(field)
+                    if not isinstance(value, str) or not value.strip():
+                        return {
+                            "success": False,
+                            "status": "invalid_action",
+                            "workflow_id": workflow.id,
+                            "org_id": org_id,
+                        }
             return {
                 "success": True,
                 "status": "loaded",
