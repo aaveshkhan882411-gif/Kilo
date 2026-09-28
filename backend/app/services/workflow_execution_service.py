@@ -148,50 +148,52 @@ class WorkflowExecutionService:
                             "workflow_id": workflow.id,
                             "org_id": org_id,
                         }
-            results = []
+            workflow_data = {
+                "id": workflow.id,
+                "org_id": workflow.org_id,
+                "name": workflow.name,
+                "trigger_type": workflow.trigger_type,
+                "actions": [dict(action) for action in actions],
+                "is_active": workflow.is_active,
+            }
 
-            for action in actions:
-                integration = EmailIntegration()
+        results = []
 
-                result = await integration.send_email(
-                    to=action["to"].strip(),
-                    subject=action["subject"].strip(),
-                    body=action["body"],
-                    html=action.get("html"),
-                )
+        for action in workflow_data["actions"]:
+            integration = EmailIntegration()
 
-                action_result = {
-                    "type": action["type"],
-                    "channel": action["channel"],
-                    "success": result.success,
+            result = await integration.send_email(
+                to=action["to"].strip(),
+                subject=action["subject"].strip(),
+                body=action["body"],
+                html=action.get("html"),
+            )
+
+            action_result = {
+                "type": action["type"],
+                "channel": action["channel"],
+                "success": result.success,
+            }
+
+            if result.error:
+                action_result["error"] = result.error
+
+            results.append(action_result)
+
+            if not result.success:
+                return {
+                    "success": False,
+                    "status": "action_failed",
+                    "workflow_id": workflow_data["id"],
+                    "org_id": org_id,
+                    "results": results,
                 }
 
-                if result.error:
-                    action_result["error"] = result.error
-
-                results.append(action_result)
-
-                if not result.success:
-                    return {
-                        "success": False,
-                        "status": "action_failed",
-                        "workflow_id": workflow.id,
-                        "org_id": org_id,
-                        "results": results,
-                    }
-
-            return {
-                "success": True,
-                "status": "executed",
-                "workflow_id": workflow.id,
-                "org_id": org_id,
-                "results": results,
-                "workflow": {
-                    "id": workflow.id,
-                    "org_id": workflow.org_id,
-                    "name": workflow.name,
-                    "trigger_type": workflow.trigger_type,
-                    "actions": workflow.actions,
-                    "is_active": workflow.is_active,
-                },
-            }
+        return {
+            "success": True,
+            "status": "executed",
+            "workflow_id": workflow_data["id"],
+            "org_id": org_id,
+            "results": results,
+            "workflow": workflow_data,
+        }
