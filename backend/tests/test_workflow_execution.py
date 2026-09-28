@@ -41,6 +41,16 @@ async def test_workflow_execution_loads_current_tenant_workflow(
         TestingSessionFactory,
     )
 
+    async def fake_send_email(self, to, subject, body, html=None):
+        from app.integrations.base import IntegrationResult
+        return IntegrationResult(success=True)
+
+    monkeypatch.setattr(
+        service_module.EmailIntegration,
+        "send_email",
+        fake_send_email,
+    )
+
     workflow = Workflow(
         org_id=test_org.id,
         name="Lead Follow Up",
@@ -66,7 +76,7 @@ async def test_workflow_execution_loads_current_tenant_workflow(
     )
 
     assert result["success"] is True
-    assert result["status"] == "loaded"
+    assert result["status"] == "executed"
     assert result["workflow"]["id"] == workflow.id
     assert result["workflow"]["org_id"] == test_org.id
 
@@ -75,8 +85,17 @@ async def test_workflow_execution_loads_current_tenant_workflow(
 async def test_workflow_execution_cannot_cross_tenant(
     db,
     test_org,
+    monkeypatch,
 ):
     from app.models import Organization, Workflow
+    from app.services import workflow_execution_service as service_module
+    from tests.conftest import TestingSessionFactory
+
+    monkeypatch.setattr(
+        service_module,
+        "async_session_factory",
+        TestingSessionFactory,
+    )
 
     other_org = Organization(
         name="Other Org",
@@ -121,6 +140,16 @@ async def test_workflow_execution_skips_inactive_workflow(
         service_module,
         "async_session_factory",
         TestingSessionFactory,
+    )
+
+    async def fake_send_email(self, to, subject, body, html=None):
+        from app.integrations.base import IntegrationResult
+        return IntegrationResult(success=True)
+
+    monkeypatch.setattr(
+        service_module.EmailIntegration,
+        "send_email",
+        fake_send_email,
     )
 
     workflow = Workflow(
@@ -240,6 +269,16 @@ async def test_workflow_execution_validates_email_action_parameters(
         TestingSessionFactory,
     )
 
+    async def fake_send_email(self, to, subject, body, html=None):
+        from app.integrations.base import IntegrationResult
+        return IntegrationResult(success=True)
+
+    monkeypatch.setattr(
+        service_module.EmailIntegration,
+        "send_email",
+        fake_send_email,
+    )
+
     workflow = Workflow(
         org_id=test_org.id,
         name="Email Workflow",
@@ -265,7 +304,7 @@ async def test_workflow_execution_validates_email_action_parameters(
     )
 
     assert result["success"] is True
-    assert result["status"] == "loaded"
+    assert result["status"] == "executed"
     assert result["workflow"]["actions"][0]["to"] == "customer@example.com"
 
 
@@ -309,3 +348,73 @@ async def test_workflow_execution_rejects_incomplete_email_action(
 
     assert result["success"] is False
     assert result["status"] == "invalid_action"
+
+
+@pytest.mark.asyncio
+async def test_workflow_execution_executes_email_action(
+    db,
+    test_org,
+    monkeypatch,
+):
+    from app.models import Workflow
+    from app.services import workflow_execution_service as service_module
+    from tests.conftest import TestingSessionFactory
+
+    monkeypatch.setattr(
+        service_module,
+        "async_session_factory",
+        TestingSessionFactory,
+    )
+
+    workflow = Workflow(
+        org_id=test_org.id,
+        name="Execute Email Workflow",
+        trigger_type="lead_created",
+        actions=[
+            {
+                "type": "notify",
+                "channel": "email",
+                "to": "customer@example.com",
+                "subject": "New Lead",
+                "body": "A new lead was created.",
+            }
+        ],
+        is_active=True,
+    )
+
+    db.add(workflow)
+    await db.commit()
+
+    sent = {}
+
+    async def fake_send_email(self, to, subject, body, html=None):
+        sent.update(
+            {
+                "to": to,
+                "subject": subject,
+                "body": body,
+                "html": html,
+            }
+        )
+
+        from app.integrations.base import IntegrationResult
+
+        return IntegrationResult(success=True)
+
+    monkeypatch.setattr(
+        service_module.EmailIntegration,
+        "send_email",
+        fake_send_email,
+    )
+
+    result = await WorkflowExecutionService.execute(
+        workflow.id,
+        {"org_id": test_org.id},
+    )
+
+    assert result["success"] is True
+    assert result["status"] == "executed"
+    assert result["results"][0]["success"] is True
+    assert sent["to"] == "customer@example.com"
+    assert sent["subject"] == "New Lead"
+    assert sent["body"] == "A new lead was created."

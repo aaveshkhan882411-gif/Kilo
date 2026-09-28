@@ -3,6 +3,7 @@ from typing import Any, Dict
 from sqlalchemy import select
 
 from app.database import async_session_factory
+from app.integrations.email import EmailIntegration
 from app.models import Workflow
 
 
@@ -147,9 +148,44 @@ class WorkflowExecutionService:
                             "workflow_id": workflow.id,
                             "org_id": org_id,
                         }
+            results = []
+
+            for action in actions:
+                integration = EmailIntegration()
+
+                result = await integration.send_email(
+                    to=action["to"].strip(),
+                    subject=action["subject"].strip(),
+                    body=action["body"],
+                    html=action.get("html"),
+                )
+
+                action_result = {
+                    "type": action["type"],
+                    "channel": action["channel"],
+                    "success": result.success,
+                }
+
+                if result.error:
+                    action_result["error"] = result.error
+
+                results.append(action_result)
+
+                if not result.success:
+                    return {
+                        "success": False,
+                        "status": "action_failed",
+                        "workflow_id": workflow.id,
+                        "org_id": org_id,
+                        "results": results,
+                    }
+
             return {
                 "success": True,
-                "status": "loaded",
+                "status": "executed",
+                "workflow_id": workflow.id,
+                "org_id": org_id,
+                "results": results,
                 "workflow": {
                     "id": workflow.id,
                     "org_id": workflow.org_id,
