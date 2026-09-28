@@ -7,6 +7,8 @@ from app.models.lead import Lead
 from app.auth.dependencies import get_current_active_user
 from app.models.user import User
 from app.services.audit_service import AuditService
+from app.services.workflow_execution_service import WorkflowExecutionService
+from app.workers.tasks import process_workflow_task
 
 router = APIRouter()
 
@@ -36,6 +38,19 @@ async def create_lead(
 
     await db.commit()
     await db.refresh(lead)
+
+    workflow_result = await WorkflowExecutionService.find_matching_workflows(
+        trigger_type="lead_created",
+        context={"org_id": current_user.org_id},
+    )
+
+    if workflow_result.get("success"):
+        for workflow in workflow_result.get("workflows", []):
+            process_workflow_task.delay(
+                workflow["id"],
+                current_user.org_id,
+            )
+
     return lead
 
 
