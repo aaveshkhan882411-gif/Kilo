@@ -29,8 +29,30 @@ def run_agent_task(self, agent_id: str, task: dict):
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
-def process_workflow_task(self, workflow_id: str):
-    return {"workflow_id": workflow_id, "status": "processed"}
+def process_workflow_task(self, workflow_id: str, org_id: str):
+    from app.services.workflow_execution_service import WorkflowExecutionService
+    import asyncio
+
+    if not isinstance(workflow_id, str) or not workflow_id.strip():
+        return {
+            "success": False,
+            "status": "invalid_parameters",
+            "workflow_id": workflow_id,
+        }
+
+    if not isinstance(org_id, str) or not org_id.strip():
+        return {
+            "success": False,
+            "status": "invalid_execution_context",
+            "workflow_id": workflow_id,
+        }
+
+    return asyncio.run(
+        WorkflowExecutionService.execute(
+            workflow_id=workflow_id.strip(),
+            context={"org_id": org_id.strip()},
+        )
+    )
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
