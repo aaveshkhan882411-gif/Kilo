@@ -8,6 +8,12 @@ from app.models import Appointment, Lead
 from app.models.user import User
 from app.schemas.appointment import AppointmentCreate, AppointmentResponse
 from app.services.audit_service import AuditService
+from app.services.workflow_execution_service import WorkflowExecutionService
+from app.workers.tasks import process_workflow_task
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -71,6 +77,28 @@ async def create_appointment(
 
     await db.commit()
     await db.refresh(appointment)
+
+    workflow_result = await WorkflowExecutionService.find_matching_workflows(
+        trigger_type="appointment_created",
+        context={"org_id": current_user.org_id},
+    )
+
+    if workflow_result.get("success"):
+        for workflow in workflow_result.get("workflows", []):
+            try:
+                process_workflow_task.delay(
+                    workflow["id"],
+                    current_user.org_id,
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to enqueue appointment-created workflow",
+                    extra={
+                        "workflow_id": workflow["id"],
+                        "org_id": current_user.org_id,
+                        "appointment_id": appointment.id,
+                    },
+                )
 
     return appointment
 
