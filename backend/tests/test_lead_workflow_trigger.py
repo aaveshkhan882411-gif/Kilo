@@ -72,3 +72,61 @@ async def test_create_lead_enqueues_matching_workflow(
         ("workflow-1", test_user.org_id),
         ("workflow-2", test_user.org_id),
     ]
+
+
+@pytest.mark.asyncio
+async def test_create_lead_survives_workflow_enqueue_failure(
+    client,
+    auth_headers,
+    test_user,
+):
+    matched = {
+        "success": True,
+        "status": "matched",
+        "workflows": [
+            {
+                "id": "workflow-failure",
+                "org_id": test_user.org_id,
+                "name": "Broker Failure Test",
+                "trigger_type": "lead_created",
+                "actions": [],
+                "is_active": True,
+            }
+        ],
+        "count": 1,
+    }
+
+    async def fake_find_matching_workflows(trigger_type, context):
+        assert trigger_type == "lead_created"
+        assert context["org_id"] == test_user.org_id
+        return matched
+
+    def failing_delay(workflow_id, org_id):
+        raise RuntimeError("Celery broker unavailable")
+
+    with (
+        patch(
+            "app.routers.leads.WorkflowExecutionService.find_matching_workflows",
+            new=fake_find_matching_workflows,
+        ),
+        patch(
+            "app.routers.leads.process_workflow_task.delay",
+            side_effect=failing_delay,
+        ),
+    ):
+        response = client.post(
+            "/api/leads/",
+            headers=auth_headers,
+            json={
+                "first_name": "Broker",
+                "last_name": "Failure",
+                "email": "broker-failure@example.com",
+                "phone": "8888888888",
+                "company": "Reliability Test",
+                "source": "test",
+                "notes": "workflow enqueue failure test",
+            },
+        )
+
+    assert response.status_code == 201
+    assert response.json()["email"] == "broker-failure@example.com"

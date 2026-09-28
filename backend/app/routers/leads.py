@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from app.database import get_db
@@ -9,6 +10,8 @@ from app.models.user import User
 from app.services.audit_service import AuditService
 from app.services.workflow_execution_service import WorkflowExecutionService
 from app.workers.tasks import process_workflow_task
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -46,10 +49,20 @@ async def create_lead(
 
     if workflow_result.get("success"):
         for workflow in workflow_result.get("workflows", []):
-            process_workflow_task.delay(
-                workflow["id"],
-                current_user.org_id,
-            )
+            try:
+                process_workflow_task.delay(
+                    workflow["id"],
+                    current_user.org_id,
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to enqueue lead-created workflow",
+                    extra={
+                        "workflow_id": workflow["id"],
+                        "org_id": current_user.org_id,
+                        "lead_id": lead.id,
+                    },
+                )
 
     return lead
 
