@@ -10,7 +10,13 @@ class AIGateway:
     def _select_provider(self) -> BaseProvider:
         if settings.AI_PROVIDER == "vllm":
             return VLLMProvider()
-        return MockProvider()
+
+        if settings.AI_PROVIDER == "mock":
+            return MockProvider()
+
+        raise ValueError(
+            f"Unsupported AI_PROVIDER: {settings.AI_PROVIDER}"
+        )
 
     def _resolve_model(self, model: Optional[str]) -> str:
         if model:

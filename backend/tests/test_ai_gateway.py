@@ -316,3 +316,13 @@ async def test_vllm_provider_stream_parses_sse_chunks(monkeypatch):
     ]
 
     assert chunks == ["Hello", " from", " GrowthAI"]
+
+
+def test_gateway_rejects_unsupported_provider(monkeypatch):
+    monkeypatch.setattr(settings, "AI_PROVIDER", "unsupported-provider")
+
+    with pytest.raises(
+        ValueError,
+        match="Unsupported AI_PROVIDER",
+    ):
+        AIGateway()
