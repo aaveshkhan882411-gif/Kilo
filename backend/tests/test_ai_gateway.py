@@ -326,3 +326,17 @@ def test_gateway_rejects_unsupported_provider(monkeypatch):
         match="Unsupported AI_PROVIDER",
     ):
         AIGateway()
+
+
+def test_gateway_resolve_model_rejects_provider_changed_after_init(monkeypatch):
+    monkeypatch.setattr(settings, "AI_PROVIDER", "mock")
+
+    gateway = AIGateway()
+
+    monkeypatch.setattr(settings, "AI_PROVIDER", "unsupported-provider")
+
+    with pytest.raises(
+        ValueError,
+        match="Unsupported AI_PROVIDER",
+    ):
+        gateway._resolve_model(None)

@@ -29,7 +29,12 @@ class AIGateway:
                 )
             return settings.VLLM_MODEL
 
-        return "mock"
+        if settings.AI_PROVIDER == "mock":
+            return "mock"
+
+        raise ValueError(
+            f"Unsupported AI_PROVIDER: {settings.AI_PROVIDER}"
+        )
 
     async def generate(self, prompt: str, model: Optional[str] = None, max_tokens: int = 1024, temperature: float = 0.7, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         resolved_model = self._resolve_model(model)
