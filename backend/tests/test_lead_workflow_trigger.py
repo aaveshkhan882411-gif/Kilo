@@ -35,7 +35,7 @@ async def test_create_lead_enqueues_matching_workflow(
 
     queued = []
 
-    async def fake_find_matching_workflows(trigger_type, context):
+    async def fake_find_matching_workflows(trigger_type, context, db=None):
         assert trigger_type == "lead_created"
         assert context["org_id"] == test_user.org_id
         return matched
@@ -96,7 +96,7 @@ async def test_create_lead_survives_workflow_enqueue_failure(
         "count": 1,
     }
 
-    async def fake_find_matching_workflows(trigger_type, context):
+    async def fake_find_matching_workflows(trigger_type, context, db=None):
         assert trigger_type == "lead_created"
         assert context["org_id"] == test_user.org_id
         return matched

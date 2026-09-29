@@ -1,6 +1,7 @@
 from typing import Any, Dict
 
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session_factory
 from app.integrations.email import EmailIntegration
@@ -13,6 +14,7 @@ class WorkflowExecutionService:
     async def find_matching_workflows(
         trigger_type: str,
         context: Dict[str, Any] | None,
+        db: AsyncSession | None = None,
     ) -> Dict[str, Any]:
         context = context or {}
 
@@ -33,8 +35,8 @@ class WorkflowExecutionService:
                 "count": 0,
             }
 
-        async with async_session_factory() as db:
-            result = await db.execute(
+        async def _query(session: AsyncSession) -> Dict[str, Any]:
+            result = await session.execute(
                 select(Workflow)
                 .where(
                     Workflow.org_id == org_id,
@@ -61,6 +63,13 @@ class WorkflowExecutionService:
                 ],
                 "count": len(workflows),
             }
+
+        if db is not None:
+            return await _query(db)
+
+        async with async_session_factory() as session:
+            return await _query(session)
+
     @staticmethod
     async def execute(
         workflow_id: str,
@@ -138,7 +147,6 @@ class WorkflowExecutionService:
                         "org_id": workflow.org_id,
                     }
 
-
                 for field in ("to", "subject", "body"):
                     value = action.get(field)
                     if not isinstance(value, str) or not value.strip():
@@ -148,6 +156,7 @@ class WorkflowExecutionService:
                             "workflow_id": workflow.id,
                             "org_id": org_id,
                         }
+
             workflow_data = {
                 "id": workflow.id,
                 "org_id": workflow.org_id,

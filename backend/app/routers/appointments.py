@@ -81,6 +81,7 @@ async def create_appointment(
     workflow_result = await WorkflowExecutionService.find_matching_workflows(
         trigger_type="appointment_created",
         context={"org_id": current_user.org_id},
+        db=db,
     )
 
     if workflow_result.get("success"):

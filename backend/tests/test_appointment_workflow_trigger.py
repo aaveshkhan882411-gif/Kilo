@@ -35,7 +35,7 @@ async def test_create_appointment_enqueues_matching_workflow(
 
     queued = []
 
-    async def fake_find_matching_workflows(trigger_type, context):
+    async def fake_find_matching_workflows(trigger_type, context, db=None):
         assert trigger_type == "appointment_created"
         assert context["org_id"] == test_user.org_id
         return matched
