@@ -254,3 +254,65 @@ def test_gateway_keeps_mock_default_for_mock_provider(monkeypatch):
 
     assert gateway._resolve_model(None) == "mock"
     assert gateway._resolve_model("custom-model") == "custom-model"
+
+
+@pytest.mark.asyncio
+async def test_vllm_provider_stream_parses_sse_chunks(monkeypatch):
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        async def aiter_lines(self):
+            yield 'data: {"choices":[{"delta":{"content":"Hello"}}]}'
+            yield 'data: {"choices":[{"delta":{"content":" from"}}]}'
+            yield 'data: {"choices":[{"delta":{"content":" GrowthAI"}}]}'
+            yield "data: [DONE]"
+
+    class FakeStreamContext:
+        async def __aenter__(self):
+            return FakeResponse()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            pass
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            pass
+
+        def stream(self, method, url, headers, json):
+            assert method == "POST"
+            assert url == "http://vllm.test/v1/chat/completions"
+            assert headers["Content-Type"] == "application/json"
+            assert json["model"] == "growthai-model"
+            assert json["messages"][0]["content"] == "Test prompt"
+            assert json["max_tokens"] == 128
+            assert json["temperature"] == 0.2
+            assert json["stream"] is True
+            return FakeStreamContext()
+
+    monkeypatch.setattr(
+        "app.ai.providers.base.httpx.AsyncClient",
+        FakeAsyncClient,
+    )
+
+    provider = VLLMProvider(
+        base_url="http://vllm.test/v1",
+    )
+
+    chunks = [
+        chunk
+        async for chunk in provider.stream(
+            prompt="Test prompt",
+            model="growthai-model",
+            max_tokens=128,
+            temperature=0.2,
+        )
+    ]
+
+    assert chunks == ["Hello", " from", " GrowthAI"]

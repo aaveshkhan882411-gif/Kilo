@@ -159,7 +159,59 @@ class VLLMProvider(BaseProvider):
         temperature: float,
         context: Optional[Dict[str, Any]] = None,
     ) -> AsyncIterator[str]:
-        yield ""
+        payload = {
+            "model": model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": prompt,
+                }
+            ],
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "stream": True,
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                async with client.stream(
+                    "POST",
+                    f"{self.base_url}/chat/completions",
+                    headers=self._headers(),
+                    json=payload,
+                ) as response:
+                    response.raise_for_status()
+
+                    async for line in response.aiter_lines():
+                        line = line.strip()
+
+                        if not line or not line.startswith("data:"):
+                            continue
+
+                        data = line[5:].strip()
+
+                        if data == "[DONE]":
+                            break
+
+                        try:
+                            chunk = __import__("json").loads(data)
+                        except ValueError:
+                            continue
+
+                        choices = chunk.get("choices") or []
+                        if not choices:
+                            continue
+
+                        delta = choices[0].get("delta") or {}
+                        content = delta.get("content")
+
+                        if content:
+                            yield content
+
+        except httpx.HTTPStatusError as exc:
+            yield f"[ERROR] vllm_http_error:{exc.response.status_code}"
+        except httpx.RequestError:
+            yield "[ERROR] vllm_connection_error"
 
     async def health_check(self) -> Dict[str, Any]:
         try:
