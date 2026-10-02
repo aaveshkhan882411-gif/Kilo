@@ -10,7 +10,21 @@ def send_email_task(self, to: str, subject: str, body: str):
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
 def send_whatsapp_task(self, to: str, message: str):
-    return {"status": "sent"}
+    from app.integrations.whatsapp import WhatsAppIntegration
+    import asyncio
+
+    result = asyncio.run(
+        WhatsAppIntegration().send_message(
+            to=to,
+            message=message,
+        )
+    )
+
+    return {
+        "success": result.success,
+        "data": result.data,
+        "error": result.error,
+    }
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)

@@ -49,6 +49,7 @@ class Settings(BaseSettings):
     WHATSAPP_ACCESS_TOKEN: str = ""
     WHATSAPP_PHONE_NUMBER_ID: str = ""
     WHATSAPP_VERIFY_TOKEN: str = ""
+    WHATSAPP_API_VERSION: str = ""
 
     # Email / SMTP
     SMTP_HOST: str = ""
