@@ -503,3 +503,33 @@ class AuthSession(Base):
         Index("ix_auth_sessions_user_id", "user_id"),
         Index("ix_auth_sessions_active", "user_id", "revoked_at"),
     )
+
+
+class WhatsAppWebhookEvent(Base):
+    __tablename__ = "whatsapp_webhook_events"
+
+    id = Column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+    )
+    message_id = Column(String(255), nullable=False, unique=True)
+    org_id = Column(
+        String(36),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    phone_number_id = Column(String(255), nullable=False)
+    sender_phone = Column(String(50), nullable=False)
+    message_type = Column(String(50), nullable=False, default="unknown")
+    message_body = Column(Text, nullable=True)
+    status = Column(String(50), nullable=False, default="received")
+    payload = Column(Text, nullable=False)
+    received_at = Column(DateTime, server_default=func.now(), nullable=False)
+    processed_at = Column(DateTime, nullable=True)
+    error = Column(Text, nullable=True)
+
+    __table_args__ = (
+        Index("ix_whatsapp_webhook_events_org_id", "org_id"),
+        Index("ix_whatsapp_webhook_events_status", "status"),
+    )
