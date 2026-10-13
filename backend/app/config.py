@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -77,6 +77,40 @@ class Settings(BaseSettings):
         case_sensitive=True,
         extra="ignore",
     )
+
+    @model_validator(mode="after")
+    def validate_production_settings(self):
+        if self.APP_ENV.strip().lower() in {"production", "prod"}:
+            secret = self.AUTH_SECRET.strip()
+
+            if secret == "CHANGE_ME_IN_PRODUCTION" or len(secret) < 32:
+                raise ValueError(
+                    "Production requires a strong AUTH_SECRET of at least 32 characters."
+                )
+
+            if self.APP_DEBUG:
+                raise ValueError("APP_DEBUG must be false in production.")
+
+            origins = self.cors_origins_list
+            if not origins or any(
+                origin.strip().lower().startswith(
+                    (
+                        "http://localhost",
+                        "https://localhost",
+                        "http://127.0.0.1",
+                        "https://127.0.0.1",
+                        "http://0.0.0.0",
+                        "https://0.0.0.0",
+                    )
+                )
+                for origin in origins
+            ):
+                raise ValueError(
+                    "Production CORS_ORIGINS must contain real frontend origins, "
+                    "not localhost addresses."
+                )
+
+        return self
 
     @property
     def cors_origins_list(self) -> list[str]:
