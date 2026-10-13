@@ -91,6 +91,17 @@ class Settings(BaseSettings):
             if self.APP_DEBUG:
                 raise ValueError("APP_DEBUG must be false in production.")
 
+            default_database_url = (
+                "postgresql+asyncpg://postgres:postgres@localhost:5432/growthai"
+            )
+            if not self.DATABASE_URL.strip() or (
+                self.DATABASE_URL.strip() == default_database_url
+            ):
+                raise ValueError(
+                    "Production requires an explicit DATABASE_URL; "
+                    "the development database default cannot be used."
+                )
+
             origins = self.cors_origins_list
             if not origins or any(
                 origin.strip().lower().startswith(
