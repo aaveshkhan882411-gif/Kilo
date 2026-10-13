@@ -2,30 +2,46 @@ name: Frontend Build
 
 on:
   push:
-    branches: [kilo/ultra-flame-dpe]
+    branches:
+      - kilo/ultra-flame-dpe
   pull_request:
-    branches: [kilo/ultra-flame-dpe]
+    branches:
+      - kilo/ultra-flame-dpe
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   frontend-build:
+    name: TypeScript and Production Build
     runs-on: ubuntu-latest
+
     defaults:
       run:
         working-directory: frontend
+
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
+      - name: Show runtime versions
+        run: |
+          node --version
+          npm --version
+
       - name: Install dependencies
         run: npm ci
+
+      - name: Verify Next.js version
+        run: node -p "require('next/package.json').version"
 
       - name: TypeScript check
         run: npm run typecheck
