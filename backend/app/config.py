@@ -102,6 +102,36 @@ class Settings(BaseSettings):
                     "the development database default cannot be used."
                 )
 
+            redis_settings = {
+                "REDIS_URL": self.REDIS_URL,
+                "CELERY_BROKER_URL": self.CELERY_BROKER_URL,
+                "CELERY_RESULT_BACKEND": self.CELERY_RESULT_BACKEND,
+            }
+
+            for setting_name, url in redis_settings.items():
+                normalized_url = url.strip().lower()
+
+                if not normalized_url or normalized_url in {
+                    "redis://localhost:6379/0",
+                    "redis://localhost:6379/1",
+                    "redis://localhost:6379/2",
+                    "redis://127.0.0.1:6379/0",
+                    "redis://127.0.0.1:6379/1",
+                    "redis://127.0.0.1:6379/2",
+                }:
+                    raise ValueError(
+                        f"Production requires an explicit {setting_name}; "
+                        "the development Redis default cannot be used."
+                    )
+
+                if normalized_url.startswith(
+                    ("redis://localhost", "rediss://localhost",
+                     "redis://127.0.0.1", "rediss://127.0.0.1")
+                ):
+                    raise ValueError(
+                        f"{setting_name} cannot point to localhost in production."
+                    )
+
             origins = self.cors_origins_list
             if not origins or any(
                 origin.strip().lower().startswith(
